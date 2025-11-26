@@ -317,34 +317,56 @@ export const ProfileDetails = ({
                 </Text>
               </HStack>
               <SimpleGrid columns={[1, 2, 3]} gap={4}>
-                {badges.map((badge) => (
-                  <HStack
-                    key={badge.id}
-                    p={3}
-                    bg="gray.50"
-                    borderRadius="lg"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    gap={3}
-                  >
-                    <Box
-                      bg={`${badge.color.split(".")[0]}.100`}
-                      color={badge.color}
-                      p={2}
-                      borderRadius="full"
+                {badges.map((badge) => {
+                  const rarityColor = {
+                    common: "gray",
+                    rare: "purple",
+                    legendary: "orange",
+                  }[badge.type] || "gray";
+
+                  return (
+                    <HStack
+                      key={badge.id}
+                      p={3}
+                      bg="white"
+                      borderRadius="lg"
+                      border="2px solid"
+                      borderColor={`${rarityColor}.200`}
+                      gap={3}
+                      alignItems="flex-start"
                     >
-                      <Icon as={badge.icon as ElementType} boxSize={5} />
-                    </Box>
-                    <VStack align="start" gap={0}>
-                      <Text fontWeight="bold" fontSize="sm" color="gray.800">
-                        {badge.name}
-                      </Text>
-                      <Text fontSize="xs" color="gray.500">
-                        {badge.description}
-                      </Text>
-                    </VStack>
-                  </HStack>
-                ))}
+                      <Box
+                        bg={`${badge.color.split(".")[0]}.100`}
+                        color={badge.color}
+                        p={2}
+                        borderRadius="full"
+                        mt={1}
+                      >
+                        <Icon as={badge.icon as ElementType} boxSize={5} />
+                      </Box>
+                      <VStack align="start" gap={1} flex={1}>
+                        <HStack justify="space-between" width="full">
+                          <Text fontWeight="bold" fontSize="sm" color="gray.800">
+                            {badge.name}
+                          </Text>
+                          <Badge
+                            bg={`${rarityColor}.100`}
+                            color={`${rarityColor}.700`}
+                            fontSize="0.6rem"
+                            px={2}
+                            borderRadius="full"
+                            textTransform="uppercase"
+                          >
+                            {badge.type}
+                          </Badge>
+                        </HStack>
+                        <Text fontSize="xs" color="gray.500" lineHeight="1.2">
+                          {badge.description}
+                        </Text>
+                      </VStack>
+                    </HStack>
+                  );
+                })}
               </SimpleGrid>
             </Box>
           </>
