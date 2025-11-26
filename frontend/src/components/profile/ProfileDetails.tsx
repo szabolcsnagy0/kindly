@@ -21,6 +21,7 @@ import {
   FaInfoCircle,
   FaUserClock,
   FaTrophy,
+  FaScroll,
 } from "react-icons/fa";
 import { VOLUNTEER_LEVELS, HELP_SEEKER_LEVELS } from "../../types/levels";
 import type { User } from "../../types";
@@ -353,11 +354,19 @@ export const ProfileDetails = ({
         {isOwnProfile && user.is_volunteer && (
           <>
             <Separator />
-
-            <Text fontSize="lg" fontWeight="semibold" color="gray.700">
-              My Quests
-            </Text>
-            <QuestList />
+            <Box>
+              <HStack gap={2} mb={3}>
+                <Icon
+                  as={FaScroll as ElementType}
+                  boxSize={5}
+                  color="gray.600"
+                />
+                <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+                  My Quests
+                </Text>
+              </HStack>
+              <QuestList />
+            </Box>
           </>
         )}
       </Stack>
