@@ -3,8 +3,6 @@ services:
     image: postgis/postgis:15-3.5
     ports:
       - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: kindly
       POSTGRES_USER: postgres
@@ -42,9 +40,6 @@ services:
       - backend
     networks:
       - app-network
-
-volumes:
-  db_data: {}
 
 networks:
   app-network:

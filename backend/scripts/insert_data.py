@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.db import async_session, create_db_and_tables
 from app.models import RequestType
 from app.services import AuthService
+from app.services.quest_service import QuestService
 from app.interfaces.auth_service import RegistrationData
 from app.services.request_service import RequestService
 from app.interfaces.request_service import CreateOrUpdateRequestData
@@ -119,8 +120,9 @@ async def insert_dummy_data():
         return
 
     async with async_session() as session:
-        auth_service = AuthService(session)
-        request_service = RequestService(session, auth_service)
+        quest_service = QuestService(session)
+        auth_service = AuthService(session, quest_service)
+        request_service = RequestService(session, auth_service, quest_service)
         application_service = ApplicationService(session, auth_service)
 
         session.add_all(request_types)

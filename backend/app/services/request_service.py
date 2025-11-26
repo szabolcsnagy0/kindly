@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Optional
 
 from geoalchemy2.functions import ST_DWithin, ST_Point
 from sqlalchemy import String
@@ -24,12 +25,14 @@ from ..interfaces.common_service import RequestTypeInfo
 from ..interfaces.exceptions import RequestCannotBeUpdatedError, RequestNotFoundError
 from ..models import Application, ApplicationStatus, Request, RequestType, User, TypeOf
 from ..models.request import RequestStatus
+from .quest_service import QuestService
 
 
 class RequestService(RequestServiceInterface):
-    def __init__(self, session: AsyncSession, auth_service: AuthServiceInterface):
+    def __init__(self, session: AsyncSession, auth_service: AuthServiceInterface, quest_service: QuestService):
         self.auth_service = auth_service
         self.session = session
+        self.quest_service = quest_service
 
     async def create_request(
         self, user: UserTokenData, request_data: CreateOrUpdateRequestData
@@ -115,10 +118,11 @@ class RequestService(RequestServiceInterface):
         request = (
             await self.session.execute(
                 select(Request)
+                .options(joinedload(Request.request_types))
                 .filter(Request.id == request_id)
                 .filter(Request.creator_id == user["id"])
             )
-        ).scalar_one_or_none()
+        ).unique().scalar_one_or_none()
         if request is None:
             raise RequestNotFoundError
 
@@ -143,6 +147,9 @@ class RequestService(RequestServiceInterface):
             volunteer = await self.session.get(User, accepted_application.user_id)
             if volunteer is not None:
                 volunteer.add_experience(experience_gain)
+
+                request_type_ids = [rt.id for rt in request.request_types]
+                await self.quest_service.progress_quests(volunteer.id, request_type_ids)
 
         await self.session.commit()
 

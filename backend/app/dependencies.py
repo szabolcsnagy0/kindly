@@ -1,6 +1,7 @@
 from typing import Annotated, Generic, TypeVar
 
 from fastapi import Depends
+import asyncio
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ from .services import (
     CommonService,
     RequestService,
 )
-
+from .services.quest_service import QuestService
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="api/v1/auth/login-form",
@@ -37,28 +38,36 @@ class SuccessResponse(BaseModel, Generic[T]):
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+async def get_quest_service(session: SessionDep) -> QuestService:
+    await asyncio.sleep(0)
+    return QuestService(session)
+
+QuestServiceDep = Annotated[QuestService, Depends(get_quest_service)]
 
 
-def get_auth_service(session: SessionDep):
-    return AuthService(session)
+async def get_auth_service(session: SessionDep, quest_service: Annotated[QuestService, Depends(get_quest_service)]):
+    await asyncio.sleep(0)
+    return AuthService(session, quest_service)
 
 
 AuthServiceDep = Annotated[AuthServiceInterface, Depends(get_auth_service)]
 
 
-def get_user_token_data(
+async def get_user_token_data(
     auth_service: AuthServiceDep, token: Annotated[str, Depends(oauth2_scheme)]
 ):
+    await asyncio.sleep(0)
     return auth_service.authenticate(token)
 
 
 UserDataDep = Annotated[UserTokenData, Depends(get_user_token_data)]
 
 
-def get_application_service(
+async def get_application_service(
     session: SessionDep,
     auth_service: AuthServiceDep,
 ):
+    await asyncio.sleep(0)
     return ApplicationService(session, auth_service)
 
 
@@ -67,28 +76,33 @@ ApplicationServiceDep = Annotated[
 ]
 
 
-def get_ai_service(
+async def get_ai_service(
     session: SessionDep,
     auth_service: AuthServiceDep,
 ) -> AIService:
+    await asyncio.sleep(0)
     return AIService(session, auth_service)
 
 
 AIServiceDep = Annotated[AIServiceInterface, Depends(get_ai_service)]
 
 
-def get_common_service(session: SessionDep):
+async def get_common_service(session: SessionDep):
+    await asyncio.sleep(0)
     return CommonService(session)
 
 
 CommonServiceDep = Annotated[CommonServiceInterface, Depends(get_common_service)]
 
 
-def get_request_service(
+async def get_request_service(
     session: SessionDep,
     auth_service: AuthServiceDep,
+    quest_service: Annotated[QuestService, Depends(get_quest_service)],
 ) -> RequestService:
-    return RequestService(session, auth_service)
+    await asyncio.sleep(0)
+    return RequestService(session, auth_service, quest_service)
 
 
 RequestServiceDep = Annotated[RequestServiceInterface, Depends(get_request_service)]
+ 

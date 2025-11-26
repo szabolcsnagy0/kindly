@@ -81,3 +81,8 @@ class RequestNotFoundError(ServiceException):
 class RequestCannotBeUpdatedError(ServiceException):
     def __init__(self, message: str = "Request cannot be updated"):
         super().__init__(message, status_code=status.HTTP_400_BAD_REQUEST)
+
+
+class QuestNotFoundError(ServiceException):
+    def __init__(self, message: str = "Quest not found"):
+        super().__init__(message, status_code=status.HTTP_404_NOT_FOUND)

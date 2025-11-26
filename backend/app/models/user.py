@@ -39,6 +39,8 @@ class User(Base):
         "Request", back_populates="creator"
     )
 
+    quests: Mapped[List["Quest"]] = relationship("Quest", back_populates="user")
+
     def experience_to_next_level(self) -> int:
         return 100 * self.level 
 

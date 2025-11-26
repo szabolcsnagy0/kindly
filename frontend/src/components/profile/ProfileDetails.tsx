@@ -24,6 +24,7 @@ import { VOLUNTEER_LEVELS, HELP_SEEKER_LEVELS } from "../../types/levels";
 import type { User } from "../../types";
 import { getFullName, pickAvatarPalette } from "../../utils/avatar";
 import { formatDateCompact } from "../../utils/date";
+import { QuestList } from "./QuestList";
 
 interface ProfileDetailsProps {
   currentUserIsVolunteer: boolean;
@@ -291,6 +292,18 @@ export const ProfileDetails = ({
             </Box>
           )}
         </Stack>
+
+        {/* Quests Section */}
+        {isOwnProfile && user.is_volunteer && (
+          <>
+            <Separator />
+
+            <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+              My Quests
+            </Text>
+            <QuestList />
+          </>
+        )}
       </Stack>
     </Box>
   );

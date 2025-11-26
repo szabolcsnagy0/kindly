@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .db import create_db_and_tables
-from .routers import auth, common, help_seeker, volunteer
+from .routers import auth, common, help_seeker, volunteer, quest
 from .interfaces.exceptions import ServiceException
 
 
@@ -43,6 +43,7 @@ app.include_router(auth.router, prefix=API_ROUTES_PREFIX)
 app.include_router(common.router, prefix=API_ROUTES_PREFIX)
 app.include_router(help_seeker.router, prefix=API_ROUTES_PREFIX)
 app.include_router(volunteer.router, prefix=API_ROUTES_PREFIX)
+app.include_router(quest.router, prefix=API_ROUTES_PREFIX)
 
 
 @app.exception_handler(ServiceException)

@@ -26,6 +26,7 @@ from ..interfaces.auth_service import (
 )
 from ..models import RefreshToken, User
 from .common_service import CommonService
+from .quest_service import QuestService
 
 JWT_ALGORITHM = "HS256"
 JWT_SECRET_KEY = os.getenv("JWT_SECRET")
@@ -34,8 +35,9 @@ password_hash = PasswordHash.recommended()
 
 
 class AuthService(AuthServiceInterface):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, quest_service: QuestService):
         self.session = session
+        self.quest_service = quest_service
 
     async def login(self, login_data: LoginData) -> AuthResult:
         user = (
@@ -68,6 +70,8 @@ class AuthService(AuthServiceInterface):
         try:
             self.session.add(user)
             await self.session.commit()
+
+            await self.quest_service.assign_initial_quests(user.id)
         except IntegrityError:
             await self.session.rollback()
             raise UserAlreadyExistsError
