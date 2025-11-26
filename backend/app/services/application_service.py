@@ -145,6 +145,11 @@ class ApplicationService(ApplicationServiceInterface):
                 if rating_data.rating == 5:
                     volunteer.add_badge(2)
 
+            if rating_data.rating == 5:
+                help_seeker = await self.session.get(User, user["id"])
+                if help_seeker:
+                    help_seeker.add_badge(9)
+
     async def rate_seeker(self, user: UserTokenData, request_id: int, rating_data: RateSeekerData) -> None:
         self.auth_service.authorize_with_role(user, UserRoles.VOLUNTEER)
 

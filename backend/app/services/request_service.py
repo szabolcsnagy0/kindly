@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from geoalchemy2.functions import ST_DWithin, ST_Point
@@ -57,6 +58,26 @@ class RequestService(RequestServiceInterface):
         request.request_types.extend(request_types)
         self.session.add(request)
         await self.session.commit()
+
+        # Check for "First Help Asked" badge (Badge 4) and "Community Pillar" (Badge 8)
+        request_count = (
+            await self.session.execute(
+                select(func.count(Request.id)).where(Request.creator_id == user["id"])
+            )
+        ).scalar()
+        
+        creator = await self.session.get(User, user["id"])
+        if creator:
+            if request_count == 1:
+                creator.add_badge(4)
+            elif request_count == 10:
+                creator.add_badge(8)
+            
+            # Check for "Generous Soul" (Badge 7)
+            if request_data.reward >= 5000:
+                creator.add_badge(7)
+                
+            await self.session.commit()
 
         return self._to_request_info(request)
 
@@ -147,14 +168,37 @@ class RequestService(RequestServiceInterface):
             volunteer = await self.session.get(User, accepted_application.user_id)
             if volunteer is not None:
                 volunteer.add_experience(experience_gain)
-
-                request_type_ids = [rt.id for rt in request.request_types]
-                for rt_id in request_type_ids:
-                    volunteer.add_badge(100 + rt_id)
-
-                await self.quest_service.progress_quests(volunteer.id, request_type_ids)
+                await self._award_completion_badges(volunteer, accepted_application, request)
+                await self.quest_service.progress_quests(volunteer.id, [rt.id for rt in request.request_types])
 
         await self.session.commit()
+
+    async def _award_completion_badges(self, volunteer: User, application: Application, request: Request) -> None:
+        # Check for "Speedy Service" badge (Badge 5)
+        if application.applied_at:
+            time_diff = datetime.now(timezone.utc) - application.applied_at
+            if time_diff < timedelta(hours=24):
+                volunteer.add_badge(5)
+
+        # Check for "First Help Given" (Badge 3) and "Dedicated Helper" (Badge 6)
+        completed_count = (
+            await self.session.execute(
+                select(func.count(Application.id))
+                .join(Request)
+                .where(
+                    (Application.user_id == volunteer.id) & 
+                    (Request.status == RequestStatus.COMPLETED)
+                )
+            )
+        ).scalar()
+        
+        if completed_count == 1:
+            volunteer.add_badge(3)
+        elif completed_count == 10:
+            volunteer.add_badge(6)
+
+        for rt in request.request_types:
+            volunteer.add_badge(100 + rt.id)
 
     async def get_my_requests(
         self, user: UserTokenData, filters: MyRequestsFilter
