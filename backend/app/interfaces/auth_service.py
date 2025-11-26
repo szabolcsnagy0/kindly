@@ -45,6 +45,7 @@ class UserInfo:
     level: int
     experience: int
     experience_to_next_level: int
+    badges: str
 
 
 @dataclass

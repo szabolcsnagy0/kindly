@@ -16,13 +16,13 @@ from app.services.application_service import ApplicationService
 logger = logging.getLogger(__name__)
 
 request_types = [
-    RequestType(name="Shopping"),
-    RequestType(name="Dog Walking"),
-    RequestType(name="Cleaning"),
-    RequestType(name="Gardening"),
-    RequestType(name="Tutoring"),
-    RequestType(name="Pet Sitting"),
-    RequestType(name="Home Repair")
+    RequestType(id=1, name="Shopping"),
+    RequestType(id=2, name="Dog Walking"),
+    RequestType(id=3, name="Cleaning"),
+    RequestType(id=4, name="Gardening"),
+    RequestType(id=5, name="Tutoring"),
+    RequestType(id=6, name="Pet Sitting"),
+    RequestType(id=7, name="Home Repair")
 ]
 
 requests = [

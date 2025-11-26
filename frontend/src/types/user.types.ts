@@ -12,6 +12,7 @@ export interface User {
   level: number;
   experience: number;
   experience_to_next_level: number;
+  badges: string;
 }
 
 export interface RegisterRequest {

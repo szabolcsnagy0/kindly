@@ -142,6 +142,8 @@ class ApplicationService(ApplicationServiceInterface):
             volunteer = await self.session.get(User, application.user_id)
             if volunteer is not None:
                 volunteer.add_experience(xp)
+                if rating_data.rating == 5:
+                    volunteer.add_badge(2)
 
     async def rate_seeker(self, user: UserTokenData, request_id: int, rating_data: RateSeekerData) -> None:
         self.auth_service.authorize_with_role(user, UserRoles.VOLUNTEER)
@@ -173,6 +175,8 @@ class ApplicationService(ApplicationServiceInterface):
                     seeker = await self.session.get(User, request.creator_id)
                     if seeker is not None:
                         seeker.add_experience(xp)
+                        if rating_data.rating == 5:
+                            seeker.add_badge(2)
 
     def _xp_for_rating(self, rating: int) -> int:
         return rating * 10

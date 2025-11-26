@@ -62,5 +62,6 @@ class CommonService(CommonServiceInterface):
             avg_rating=user.avg_rating,
             level=user.level,
             experience=user.experience,
-            experience_to_next_level=100 * user.level
+            experience_to_next_level=100 * user.level,
+            badges=user.badges
         )

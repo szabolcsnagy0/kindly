@@ -10,6 +10,7 @@ import {
   Icon,
   Separator,
   Badge,
+  SimpleGrid,
 } from "@chakra-ui/react";
 import { Avatar } from "@chakra-ui/react/avatar";
 import {
@@ -19,12 +20,14 @@ import {
   FaEnvelope,
   FaInfoCircle,
   FaUserClock,
+  FaTrophy,
 } from "react-icons/fa";
 import { VOLUNTEER_LEVELS, HELP_SEEKER_LEVELS } from "../../types/levels";
 import type { User } from "../../types";
 import { getFullName, pickAvatarPalette } from "../../utils/avatar";
 import { formatDateCompact } from "../../utils/date";
 import { QuestList } from "./QuestList";
+import { getBadgeInfo } from "../../utils/badges";
 
 interface ProfileDetailsProps {
   currentUserIsVolunteer: boolean;
@@ -66,6 +69,10 @@ export const ProfileDetails = ({
   const nextLevelMeta = levelMap[currentLevel + 1] || {
     name: `Level ${currentLevel + 1}`,
   };
+
+  const badges = user.badges
+    ? user.badges.split(",").filter(Boolean).map((id) => getBadgeInfo(id))
+    : [];
 
   return (
     <Box
@@ -292,6 +299,55 @@ export const ProfileDetails = ({
             </Box>
           )}
         </Stack>
+
+        {/* Badges Section */}
+        {badges.length > 0 && (
+          <>
+            <Separator />
+            <Box>
+              <HStack gap={2} mb={3}>
+                <Icon
+                  as={FaTrophy as ElementType}
+                  boxSize={5}
+                  color="gray.600"
+                />
+                <Text fontSize="lg" fontWeight="semibold" color="gray.700">
+                  Badges
+                </Text>
+              </HStack>
+              <SimpleGrid columns={[1, 2, 3]} gap={4}>
+                {badges.map((badge) => (
+                  <HStack
+                    key={badge.id}
+                    p={3}
+                    bg="gray.50"
+                    borderRadius="lg"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    gap={3}
+                  >
+                    <Box
+                      bg={`${badge.color.split(".")[0]}.100`}
+                      color={badge.color}
+                      p={2}
+                      borderRadius="full"
+                    >
+                      <Icon as={badge.icon as ElementType} boxSize={5} />
+                    </Box>
+                    <VStack align="start" gap={0}>
+                      <Text fontWeight="bold" fontSize="sm" color="gray.800">
+                        {badge.name}
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        {badge.description}
+                      </Text>
+                    </VStack>
+                  </HStack>
+                ))}
+              </SimpleGrid>
+            </Box>
+          </>
+        )}
 
         {/* Quests Section */}
         {isOwnProfile && user.is_volunteer && (

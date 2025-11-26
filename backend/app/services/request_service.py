@@ -149,6 +149,9 @@ class RequestService(RequestServiceInterface):
                 volunteer.add_experience(experience_gain)
 
                 request_type_ids = [rt.id for rt in request.request_types]
+                for rt_id in request_type_ids:
+                    volunteer.add_badge(100 + rt_id)
+
                 await self.quest_service.progress_quests(volunteer.id, request_type_ids)
 
         await self.session.commit()

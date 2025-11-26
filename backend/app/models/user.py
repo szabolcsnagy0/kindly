@@ -22,6 +22,7 @@ class User(Base):
     avg_rating: Mapped[float] = mapped_column(sa.Float, default=0.0)
     level: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
     experience: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    badges: Mapped[str] = mapped_column(sa.String, nullable=False, default="")
 
     created_at: Mapped[datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True),
@@ -53,3 +54,13 @@ class User(Base):
         while self.experience >= self.experience_to_next_level():
             self.experience -= self.experience_to_next_level()
             self.level += 1
+        
+        if self.level >= 2:
+            self.add_badge(1)
+
+    def add_badge(self, badge_id: int) -> None:
+        current_badges = self.badges.split(",") if self.badges else []
+        str_id = str(badge_id)
+        if str_id not in current_badges:
+            current_badges.append(str_id)
+            self.badges = ",".join(current_badges)
