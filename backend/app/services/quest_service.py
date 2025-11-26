@@ -23,7 +23,17 @@ class QuestService:
         if not request_types:
             return None
 
-        request_type = random.choice(request_types)
+        current_quests = (await self.session.execute(
+            select(Quest).where(Quest.user_id == user_id)
+        )).scalars().all()
+        
+        existing_type_ids = {q.request_type_id for q in current_quests}
+        available_types = [rt for rt in request_types if rt.id not in existing_type_ids]
+        
+        if not available_types:
+            return None
+
+        request_type = random.choice(available_types)
         target_count = random.randint(1, 5)
         deadline = datetime.now(timezone.utc) + timedelta(days=7*target_count)
 
