@@ -9,7 +9,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  sdet-audit:
+  claude-review:
     # Trigger only on PR comments starting with '/claude-review'
     if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, '/claude-review') }}
     runs-on: ubuntu-latest
@@ -22,6 +22,14 @@ jobs:
           ref: refs/pull/${{ github.event.issue.number }}/head
           # Fetch full history (depth: 0) so the agent can compare against main
           fetch-depth: 0
+
+      - name: Post Start Comment
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          message: |
+            Review started... I am analyzing your changes. 🕵️‍♂️
+          comment_tag: review_report
+          mode: upsert
 
       - name: Fetch Main Branch
         run: git fetch origin main
@@ -114,10 +122,11 @@ jobs:
         run: |
           # We pipe the prompt into Claude.
           # The --print flag ensures it outputs the response to stdout.
-          claude --print "$(cat audit_instructions.md)" > sdet_report.md
+          claude --print "$(cat audit_instructions.md)" > review_report.md
 
       - name: Post Audit Comment
         uses: thollander/actions-comment-pull-request@v2
         with:
-          filePath: sdet_report.md
-          comment_tag: sdet_audit_report
+          filePath: review_report.md
+          comment_tag: review_report
+          mode: upsert
