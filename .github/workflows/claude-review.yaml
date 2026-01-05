@@ -168,56 +168,35 @@ jobs:
           - Debug Artifacts: Any console.log, debugger, or commented code?
           - Documentation: Are complex algorithms or business logic explained?
 
-          ## Phase 3: Structured Output
+          ## Phase 3: Output Format (STRICT)
 
-          **Format:** Use clear, professional markdown. Be direct and specific.
-
-          ### If No Significant Issues Found
+          ### If No Significant Issues
 
           ```markdown
-          ## Code Review: APPROVED ✅
+          ## ✅ APPROVED
 
           **Summary:** [2-3 sentences describing what changed and confirming it's production-ready]
 
-          **Verified:**
-          - Security: No vulnerabilities detected
-          - Architecture: Aligns with existing patterns
-          - Testing: Adequate coverage including edge cases
-          - Quality: Clean, maintainable code
-
-          **Notes:** [Any minor observations or suggestions for future consideration]
+          No significant issues found. Changes reviewed for security, architecture, correctness, testing, and code quality.
           ```
 
           ### If Issues Found
 
           ```markdown
-          ## Code Review: CHANGES REQUESTED
+          ## ⚠️ ISSUES FOUND
 
-          ### Issues Found
-
-          1. **[Security] file.ts:45:** [Clear description of issue]
-             - **Impact:** [Why this matters]
-             - **Suggestion:** [How to fix]
-
-          2. **[Performance] api.ts:120:** [Description]
-             - **Impact:** [Risk/concern]
-             - **Suggestion:** [Recommended fix]
-
-          3. **[Quality] utils.ts:34:** [Description]
-             - **Suggestion:** [How to improve]
-
-          ### Summary
-          [Overall assessment - how many critical vs minor issues, overall recommendation]
+          1. **[Security] file.ts:123** - SQL injection in database query - Use parameterized queries
+          2. **[Correctness] handler.ts:45** - Missing await on async function - Add await keyword
+          3. **[Testing] service.test.ts:89** - Weak assertion using .any() - Use specific expected values
           ```
 
-          ## Guidelines for Output
-
-          - **Be specific:** Reference exact files and line numbers
-          - **Explain impact:** Don't just say "this is bad", explain why it matters
-          - **Provide solutions:** Suggest concrete fixes
-          - **Be honest:** If the code is good, say so. If it's not, explain clearly.
-          - **Think holistically:** Consider the entire system, not just the diff
-          - **Use numbered lists:** Makes issues easy to reference and discuss
+          **Format Rules:**
+          - One line per issue: `**[Category] file:line** - problem description - suggested fix`
+          - Categories: Security, Performance, Correctness, Architecture, Testing, Quality
+          - Keep each issue to one line, be concise
+          - No sub-bullets, no Impact sections, no detailed explanations
+          - No executive summary, no overall assessment sections
+          - Just the numbered list
           EOF
 
       - name: Run Claude Review
