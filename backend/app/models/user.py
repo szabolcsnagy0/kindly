@@ -58,9 +58,6 @@ class User(Base):
         while self.experience >= self.experience_to_next_level():
             self.experience -= self.experience_to_next_level()
             self.level += 1
-        
-        if self.level >= 2:
-            self.add_badge(1)
 
     def add_badge(self, badge_id: int) -> None:
         current_badges = self.badges.split(",") if self.badges else []

@@ -53,7 +53,7 @@ export const badgeService = {
 
   getRarityName(rarity: number) {
     const names = ["Common", "Rare", "Epic", "Legendary"];
-    return names[rarity - 1];
+    return names[rarity - 1] || "Unknown";
   },
 
   async createSpecialBadge(

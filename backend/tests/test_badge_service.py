@@ -109,6 +109,9 @@ async def test_check_and_award_badges():
 
     await check_and_award_badges(session, 1)
 
+    assert session.execute.called
+    assert session.execute.call_count >= 3
+
 
 def test_badge_definitions_exist():
     assert BADGE_DEFINITIONS is not None

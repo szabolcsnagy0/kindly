@@ -74,12 +74,15 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchi
     )
     badges = result.scalars().all()
 
-    for badge in badges:
+    if badges:
         user_result = await session.execute(
-            select(User).where(User.id == badge.user_id)
+            select(User).where(User.id == user_id)
         )
         user = user_result.scalar_one()
-        badge.user_name = f"{user.first_name} {user.last_name}"
+        user_name = f"{user.first_name} {user.last_name}"
+
+        for badge in badges:
+            badge.user_name = user_name
 
     return badges
 
@@ -87,7 +90,7 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchi
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
         select(func.count(Application.id)).where(
-            Application.volunteer_id == user_id,
+            Application.user_id == user_id,
             Application.status == 'ACCEPTED'
         )
     )
@@ -122,10 +125,17 @@ async def admin_award_special_badge(
     rarity: int,
     api_key: str
 ) -> Optional[BadgeAchievement]:
+    if not ADMIN_API_KEY:
+        raise ValueError("ADMIN_API_KEY environment variable is not configured")
+
     if api_key != ADMIN_API_KEY:
         return None
 
-    badge_id = len(BADGE_DEFINITIONS) + 1
+    max_badge_id_result = await session.execute(
+        select(func.max(BadgeAchievement.badge_id))
+    )
+    max_badge_id = max_badge_id_result.scalar() or len(BADGE_DEFINITIONS)
+    badge_id = max_badge_id + 1
 
     badge = BadgeAchievement(
         user_id=user_id,
@@ -151,10 +161,9 @@ async def get_badge_leaderboard(session: AsyncSession) -> List[dict]:
             u.first_name,
             u.last_name,
             COUNT(ba.id) as badge_count,
-            SUM(CASE WHEN ba.rarity = 4 THEN 1 ELSE 0 END) as legendary_count
+            COALESCE(SUM(CASE WHEN ba.rarity = 4 THEN 1 ELSE 0 END), 0) as legendary_count
         FROM "user" u
-        LEFT JOIN badge_achievement ba ON u.id = ba.user_id
-        WHERE ba.is_completed = true
+        LEFT JOIN badge_achievement ba ON u.id = ba.user_id AND ba.is_completed = true
         GROUP BY u.id, u.first_name, u.last_name
         ORDER BY legendary_count DESC, badge_count DESC
         LIMIT 100
