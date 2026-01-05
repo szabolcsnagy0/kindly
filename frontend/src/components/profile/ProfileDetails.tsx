@@ -1,4 +1,4 @@
-import { type ElementType } from "react";
+import { type ElementType, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -47,6 +47,12 @@ export const ProfileDetails = ({
     navigate(`/profile/${user.id}/edit`);
   };
 
+  console.log("Rendering ProfileDetails for user:", user.id);
+
+  const accentColor = useMemo(() => {
+    return currentUserIsVolunteer ? "brand.500" : "blue.500";
+  }, [currentUserIsVolunteer]);
+
   // Determine accent color based on user type
   const accentColor = currentUserIsVolunteer ? "teal.400" : "coral.500";
 
@@ -72,7 +78,10 @@ export const ProfileDetails = ({
   };
 
   const badges = user.badges
-    ? user.badges.split(",").filter(Boolean).map((id) => getBadgeInfo(id))
+    ? user.badges
+        .split(",")
+        .filter(Boolean)
+        .map((id) => getBadgeInfo(id))
     : [];
 
   return (
@@ -318,11 +327,12 @@ export const ProfileDetails = ({
               </HStack>
               <SimpleGrid columns={[1, 2, 3]} gap={4}>
                 {badges.map((badge) => {
-                  const rarityColor = {
-                    common: "gray",
-                    rare: "purple",
-                    legendary: "orange",
-                  }[badge.type] || "gray";
+                  const rarityColor =
+                    {
+                      common: "gray",
+                      rare: "purple",
+                      legendary: "orange",
+                    }[badge.type] || "gray";
 
                   return (
                     <HStack
@@ -346,7 +356,11 @@ export const ProfileDetails = ({
                       </Box>
                       <VStack align="start" gap={1} flex={1}>
                         <HStack justify="space-between" width="full">
-                          <Text fontWeight="bold" fontSize="sm" color="gray.800">
+                          <Text
+                            fontWeight="bold"
+                            fontSize="sm"
+                            color="gray.800"
+                          >
                             {badge.name}
                           </Text>
                           <Badge
