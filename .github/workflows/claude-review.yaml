@@ -170,6 +170,14 @@ jobs:
 
           ## Phase 3: Output Format (STRICT)
 
+          **CRITICAL:** Your response must start IMMEDIATELY with either "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
+
+          DO NOT include:
+          - Any conversational text or preamble
+          - Phrases like "Perfect!", "Let me analyze...", "Based on my review..."
+          - Any text before the ## heading
+          - Any explanatory text after the formatted output
+
           ### If No Significant Issues
 
           ```markdown
@@ -191,12 +199,15 @@ jobs:
           ```
 
           **Format Rules:**
+          - Your ENTIRE response must be ONLY the formatted output above
+          - Start immediately with "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
           - One line per issue: `**[Category] file:line** - problem description - suggested fix`
           - Categories: Security, Performance, Correctness, Architecture, Testing, Quality
           - Keep each issue to one line, be concise
           - No sub-bullets, no Impact sections, no detailed explanations
           - No executive summary, no overall assessment sections
-          - Just the numbered list
+          - No conversational text before or after
+          - Just the formatted output, nothing else
           EOF
 
       - name: Run Claude Review
@@ -208,6 +219,16 @@ jobs:
           CI: true
         run: |
           claude --print "$(cat audit_instructions.md)" > review_report.md
+
+      - name: Debug Review Output
+        if: always()
+        run: |
+          echo "=== Review report file info ==="
+          ls -lah review_report.md || echo "File not found"
+          echo "=== Review report contents ==="
+          cat review_report.md || echo "Cannot read file"
+          echo "=== Review report hex dump (first 100 bytes) ==="
+          xxd -l 100 review_report.md || echo "Cannot dump file"
 
       - name: Post Success Comment
         if: ${{ steps.review.outcome == 'success' }}
