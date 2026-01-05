@@ -46,8 +46,16 @@ class LeaderboardEntry(BaseModel):
 async def award_badge_to_user(
     request: AwardBadgeRequest,
     session: SessionDep,
-    user_data: UserDataDep
+    user_data: UserDataDep,
+    x_api_key: str = Header(None)
 ):
+    import os
+    import secrets
+
+    admin_key = os.getenv("ADMIN_API_KEY", "")
+    if not x_api_key or not admin_key or not secrets.compare_digest(x_api_key, admin_key):
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
     badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
 
     return SuccessResponse(

@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,7 +120,7 @@ async def admin_award_special_badge(
     rarity: int,
     api_key: str
 ) -> Optional[BadgeAchievement]:
-    if api_key != ADMIN_API_KEY:
+    if not api_key or not ADMIN_API_KEY or not secrets.compare_digest(api_key, ADMIN_API_KEY):
         return None
 
     badge_id = len(BADGE_DEFINITIONS) + 1
