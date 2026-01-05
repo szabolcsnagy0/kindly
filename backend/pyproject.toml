@@ -14,3 +14,9 @@ dependencies = [
     "geoalchemy2>=0.18.0",
     "openai>=2.6.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
