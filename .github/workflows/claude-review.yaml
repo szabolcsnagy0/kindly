@@ -4,9 +4,19 @@ on:
   issue_comment:
     types: [created]
 
+run-name: ${{ github.workflow }}--${{ github.event.issue.number }}
+
+env:
+  GITHUB_PR_NUMBER: ${{ github.event.issue.number }}
+
+concurrency:
+  group: claude-review-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   claude-review:
@@ -15,24 +25,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: React to Trigger Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            })
+
       - name: Checkout PR Code
         uses: actions/checkout@v4
         with:
           # Checkout the head of the PR branch
-          ref: refs/pull/${{ github.event.issue.number }}/head
+          ref: refs/pull/${{ env.GITHUB_PR_NUMBER }}/head
           # Fetch full history (depth: 0) so the agent can compare against main
           fetch-depth: 0
 
       - name: Post Start Comment
-        uses: thollander/actions-comment-pull-request@v2
+        id: initial-comment
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
         with:
-          message: |
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body: |
             Review started... I am analyzing your changes. 🕵️‍♂️
-          comment_tag: review_report
-          mode: upsert
+
+            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
       - name: Fetch Main Branch
         run: git fetch origin main
+
+      - name: Validate PR Has Changes
+        run: |
+          CHANGES=$(git --no-pager diff --name-only origin/main...HEAD | wc -l)
+          if [ "$CHANGES" -eq 0 ]; then
+            echo "No changes detected in this PR"
+            exit 1
+          fi
+          echo "Found $CHANGES changed files"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -45,88 +77,176 @@ jobs:
       - name: Create Audit Instructions
         run: |
           cat << 'EOF' > audit_instructions.md
-          # Role: Senior SDET & Code Auditor
+          # Role: Senior Engineering Architect & Code Auditor
 
-          **Objective:** Audit the provided Git Diff for Security, Robustness, Test Coverage, and Code Quality.
-          **Prime Directive:** Minimize False Positives. If the code is well-tested, secure, and clean, strictly output "✅ No issues found."
+          **Objective:** Perform an exhaustive, professional code review of this Pull Request against main branch.
 
-          ## Phase 1: Context Gathering
+          **Prime Directive:** Be thorough but precise. Flag real issues with clear justification. If code is production-ready, say so clearly.
 
-          **CRITICAL RULE:** All `git` commands MUST use the `--no-pager` flag. Never run a git command that might trigger an interactive shell.
+          ## Phase 1: Comprehensive Context Gathering
 
-          1.  **Identify Changes:**
-              Execute: `git --no-pager diff --name-only origin/main...HEAD | grep -vE 'package-lock.json|yarn.lock|dist/|\.map$'`
+          **CRITICAL:** All git commands MUST use `--no-pager`. Never trigger interactive shells.
 
-          2.  **Map & Read:**
-              For every logic file modified:
-              a. Locate its corresponding test file.
-              b. Use `read_file` to read the **FULL content** of both source and test files.
+          1. **Get Complete Diff:**
+             ```bash
+             git --no-pager diff origin/main...HEAD
+             ```
 
-          3.  **Isolate the Delta:**
-              Execute: `git --no-pager diff origin/main...HEAD -- [list of source files]`
-              *Use this diff to pinpoint exactly which lines are new.*
+          2. **Identify All Changed Files:**
+             ```bash
+             git --no-pager diff --name-status origin/main...HEAD
+             ```
 
-          ## Phase 2: The Audit
-          *Internal process only. Do not output text during this phase.*
+          3. **Read Full Context:**
+             - For each modified file, use Read tool to get COMPLETE file contents
+             - For each new file, understand its purpose in the broader architecture
+             - Identify corresponding test files and read them fully
+             - Look for related files that might be affected (imports, dependencies)
 
-          1.  **Security Scan (CRITICAL):**
-              * **Secrets:** Scan added lines for hardcoded API keys, tokens, or passwords.
-              * **Injection:** Check for unsanitized inputs in SQL, shell commands, or HTML.
-              * **Input Validation:** Ensure external inputs (API payloads, DB results) are typed/validated before use.
+          4. **Understand the Change:**
+             - What problem is being solved?
+             - What is the scope of impact?
+             - Are there related changes that should have been included?
 
-          2.  **Correctness & Robustness:**
-              * **Error Handling:** Look for "swallowed" errors (Promises without `.catch`, empty `try/catch` blocks).
-              * **Edge Cases:** Does the logic handle `null`, `undefined`, or empty arrays?
-              * **Async Safety:** Check for potential race conditions or un-awaited Promises.
+          ## Phase 2: Multi-Dimensional Analysis
 
-          3.  **The Coverage & Quality Check:**
-              * **Gap Analysis:** Do the changes include **Negative Test Cases** (error paths/invalid inputs), not just happy paths?
-              * **Strictness:** Flag `expect.any(...)` or loose matchers unless strictly necessary for non-deterministic data.
-              * **Cleanliness:** Flag Magic Numbers, deeply nested complexity, or debug artifacts (`console.log`).
+          Evaluate the changes across ALL dimensions below. Think critically about each.
 
-          ## Phase 3: The Output (Strict Conditional)
+          **Security (BLOCKING)**
+          - Secrets & Credentials: Any hardcoded API keys, tokens, passwords, or sensitive data?
+          - Injection Vulnerabilities: SQL injection, command injection, XSS, path traversal?
+          - Input Validation: Are all external inputs (API payloads, user input, file uploads) validated?
+          - Authentication & Authorization: Are security boundaries properly enforced?
+          - Dependency Security: Any new dependencies with known vulnerabilities?
 
-          **CRITICAL:** Output Markdown directly. No conversational filler.
+          **Architecture & Scaling**
+          - Scalability: Will this work at 10x, 100x current load?
+          - Database Performance: Are there N+1 queries, missing indexes, or table scans?
+          - Memory & Resource Usage: Any memory leaks, unbounded collections, or resource exhaustion risks?
+          - Architectural Consistency: Does this fit the existing system design patterns?
+          - Service Boundaries: Are responsibilities properly separated?
 
-          **Evaluation Logic:**
-          IF (No Security Issues AND No Critical Logic Gaps AND No Weak Assertions AND No Quality issues):
-              Output **Scenario A**.
-          ELSE:
-              Output **Scenario B**.
+          **Correctness & Robustness**
+          - Error Handling: Are all error paths handled? Any swallowed errors?
+          - Edge Cases: Null, undefined, empty arrays, boundary conditions, race conditions?
+          - Async Safety: All Promises awaited? Proper async/await usage?
+          - Data Integrity: Can this cause data corruption or inconsistency?
+          - Concurrency: Thread-safe? Handles concurrent requests properly?
 
-          ---
+          **Consistency & Maintainability**
+          - Code Style: Consistent with the existing codebase patterns?
+          - Naming: Clear, descriptive, following project conventions?
+          - Complexity: Is the solution as simple as it can be, or over-engineered?
+          - Duplication: Is there existing code that does something similar?
+          - Magic Numbers/Strings: Are constants properly named and documented?
+          - Technical Debt: Does this add debt, or reduce it?
 
-          ### Scenario A: Clean Bill of Health
-          ## Code Audit: PASS
-          **Verified:** [One concise sentence. Example: "Update to `AuthService` handles edge cases correctly and includes strict negative testing."]
+          **Failure Modes & Graceful Degradation**
+          - Failure Impact: What happens when this code fails? Does it cascade?
+          - Graceful Degradation: Can the system continue operating in a degraded state?
+          - Rollback Safety: Can this change be safely rolled back?
+          - Monitoring & Observability: Can failures be detected and diagnosed?
+          - Retry Logic: Appropriate backoff and retry strategies?
 
-          ---
+          **Trap-Door Decisions**
+          - Irreversible Choices: Are there decisions that will be hard to change later?
+          - API Contracts: Are new APIs well-designed? Versioned if public?
+          - Database Migrations: Are schema changes backwards compatible?
+          - Breaking Changes: Any breaking changes to existing contracts?
 
-          ### Scenario B: Issues Found
-          ## Code & Security Audit
+          **Testing & Coverage**
+          - Test Coverage: Are all new code paths tested?
+          - Negative Tests: Are error paths and edge cases tested?
+          - Integration Tests: Are interactions with other systems tested?
+          - Test Quality: Are assertions specific and meaningful (not .any())?
+          - Flakiness Risk: Are tests deterministic and reliable?
 
-          ### Actionable Items
-          *List all security risks, bugs, coverage gaps, or weak assertions.*
+          **Complexity & Code Quality**
+          - Cyclomatic Complexity: Is the code easy to understand?
+          - Nesting Depth: Too many nested conditionals or callbacks?
+          - Function Length: Are functions focused and reasonably sized?
+          - Debug Artifacts: Any console.log, debugger, or commented code?
+          - Documentation: Are complex algorithms or business logic explained?
 
-          - **[Category] [File/Test Name]:** [Brief description]
-            *Example: "**[Security] `db_client.ts`:** Potential SQL injection; input parameter is concatenated directly."*
-            *Example: "**[Reliability] `api_handler.ts`:** Promise rejection is unhandled in `fetchUserData`."*
-            *Example: "**[Coverage] `auth_flow.ts`:** Logic handles invalid tokens, but no corresponding negative test exists in `auth_flow.test.ts`."*
-            *Example: "**[Quality] `calculator.ts`:** Magic number `86400` used; extract to `SECONDS_IN_DAY` constant."*
+          ## Phase 3: Structured Output
+
+          **Format:** Use clear, professional markdown. Be direct and specific.
+
+          ### If No Significant Issues Found
+
+          ```markdown
+          ## Code Review: APPROVED ✅
+
+          **Summary:** [2-3 sentences describing what changed and confirming it's production-ready]
+
+          **Verified:**
+          - Security: No vulnerabilities detected
+          - Architecture: Aligns with existing patterns
+          - Testing: Adequate coverage including edge cases
+          - Quality: Clean, maintainable code
+
+          **Notes:** [Any minor observations or suggestions for future consideration]
+          ```
+
+          ### If Issues Found
+
+          ```markdown
+          ## Code Review: CHANGES REQUESTED
+
+          ### Issues Found
+
+          1. **[Security] file.ts:45:** [Clear description of issue]
+             - **Impact:** [Why this matters]
+             - **Suggestion:** [How to fix]
+
+          2. **[Performance] api.ts:120:** [Description]
+             - **Impact:** [Risk/concern]
+             - **Suggestion:** [Recommended fix]
+
+          3. **[Quality] utils.ts:34:** [Description]
+             - **Suggestion:** [How to improve]
+
+          ### Summary
+          [Overall assessment - how many critical vs minor issues, overall recommendation]
+          ```
+
+          ## Guidelines for Output
+
+          - **Be specific:** Reference exact files and line numbers
+          - **Explain impact:** Don't just say "this is bad", explain why it matters
+          - **Provide solutions:** Suggest concrete fixes
+          - **Be honest:** If the code is good, say so. If it's not, explain clearly.
+          - **Think holistically:** Consider the entire system, not just the diff
+          - **Use numbered lists:** Makes issues easy to reference and discuss
           EOF
 
       - name: Run Claude Review
+        id: review
+        continue-on-error: true
+        timeout-minutes: 10
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CI: true
         run: |
-          # We pipe the prompt into Claude.
-          # The --print flag ensures it outputs the response to stdout.
           claude --print "$(cat audit_instructions.md)" > review_report.md
 
-      - name: Post Audit Comment
-        uses: thollander/actions-comment-pull-request@v2
+      - name: Post Success Comment
+        if: ${{ steps.review.outcome == 'success' }}
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
         with:
-          filePath: review_report.md
-          comment_tag: review_report
-          mode: upsert
+          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body-path: review_report.md
+          edit-mode: replace
+
+      - name: Post Failure Comment
+        if: ${{ steps.review.outcome == 'failure' }}
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
+        with:
+          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body: |
+            :x: Claude review failed to complete.
+
+            [View workflow run for details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          edit-mode: replace
