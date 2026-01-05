@@ -35,7 +35,7 @@ export const badgeService = {
   },
 
   async checkAchievements() {
-    api.post("/badges/check-achievements");
+    await api.post("/badges/check-achievements");
   },
 
   async getBadgeProgress(badgeId: number): Promise<{ badge_id: number; progress: number; completed: boolean }> {

@@ -12,7 +12,6 @@ export const BadgeCard = ({ badge, onClick }: BadgeCardProps) => {
   const rarityName = badgeService.getRarityName(badge.rarity);
 
   const handleClick = () => {
-    console.log("Badge clicked:", badge);
     if (onClick) {
       onClick();
     }

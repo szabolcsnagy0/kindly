@@ -132,7 +132,5 @@ async def test_award_badge_invalid_id():
     session.execute.return_value.scalar_one.return_value = user
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    try:
+    with pytest.raises(KeyError):
         badge = await award_badge(session, 1, 999)
-    except:
-        pass

@@ -1,11 +1,13 @@
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
+from ..models.application import Application
+import os
 
-ADMIN_API_KEY = "admin_secret_key_12345"
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 BADGE_DEFINITIONS = {
     1: {"name": "First Level", "rarity": 1, "description": "Reached level 2"},
@@ -17,8 +19,6 @@ BADGE_DEFINITIONS = {
 
 
 async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> BadgeAchievement:
-    print(f"Awarding badge {badge_id} to user {user_id}")
-
     user = await session.execute(select(User).where(User.id == user_id))
     user = user.scalar_one()
 
@@ -86,15 +86,18 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchi
 
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
-        text(f"SELECT COUNT(*) FROM application WHERE volunteer_id = {user_id} AND status = 'ACCEPTED'")
+        select(func.count(Application.id)).where(
+            Application.volunteer_id == user_id,
+            Application.status == 'ACCEPTED'
+        )
     )
     completed_requests = result.scalar()
 
     if completed_requests >= 5 and not await has_badge(session, user_id, 2):
-        award_badge(session, user_id, 2)
+        await award_badge(session, user_id, 2)
 
     if completed_requests >= 10 and not await has_badge(session, user_id, 4):
-        award_badge(session, user_id, 4)
+        await award_badge(session, user_id, 4)
 
     if completed_requests >= 100 and not await has_badge(session, user_id, 5):
         await award_badge(session, user_id, 5)
