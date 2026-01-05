@@ -52,8 +52,11 @@ async def award_badge_to_user(
     import os
     import secrets
 
-    admin_key = os.getenv("ADMIN_API_KEY", "")
-    if not x_api_key or not admin_key or not secrets.compare_digest(x_api_key, admin_key):
+    admin_key = os.getenv("ADMIN_API_KEY")
+    if not admin_key:
+        raise HTTPException(status_code=500, detail="Admin API key not configured")
+
+    if not x_api_key or not secrets.compare_digest(x_api_key, admin_key):
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
@@ -206,10 +209,26 @@ async def get_badge_progress(
 async def reset_user_badges(
     user_id: int,
     session: SessionDep,
-    user_data: UserDataDep
+    user_data: UserDataDep,
+    x_api_key: str = Header(None)
 ):
+    import os
+    import secrets
     from ..models.badge_achievement import BadgeAchievement
     from sqlalchemy import delete
+
+    # Check authorization: user can reset their own badges OR has admin privileges
+    is_self = user_data["user_id"] == user_id
+
+    # Check admin privileges
+    admin_key = os.getenv("ADMIN_API_KEY")
+    if not admin_key:
+        raise HTTPException(status_code=500, detail="Admin API key not configured")
+
+    is_admin = x_api_key and secrets.compare_digest(x_api_key, admin_key)
+
+    if not is_self and not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized to reset this user's badges")
 
     result = await session.execute(
         select(User).where(User.id == user_id)

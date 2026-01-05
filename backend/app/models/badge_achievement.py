@@ -9,6 +9,9 @@ from .base import Base
 
 class BadgeAchievement(Base):
     __tablename__ = "badge_achievement"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "badge_id", name="uq_user_badge"),
+    )
 
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(sa.Integer, sa.ForeignKey("user.id"), nullable=False)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
 
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 BADGE_DEFINITIONS = {
     1: {"name": "Making Progress!", "rarity": 1, "description": "Reached Level 2"},
@@ -34,7 +34,9 @@ async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> Bad
     user = await session.execute(select(User).where(User.id == user_id))
     user = user.scalar_one()
 
-    badge_info = BADGE_DEFINITIONS[badge_id]
+    badge_info = BADGE_DEFINITIONS.get(badge_id)
+    if not badge_info:
+        raise ValueError(f"Invalid badge_id: {badge_id}. Badge does not exist.")
 
     existing = await session.execute(
         select(BadgeAchievement).where(
@@ -123,7 +125,18 @@ async def admin_award_special_badge(
     if not api_key or not ADMIN_API_KEY or not secrets.compare_digest(api_key, ADMIN_API_KEY):
         return None
 
-    badge_id = len(BADGE_DEFINITIONS) + 1
+    # Query for the max badge_id across all existing badges to ensure uniqueness
+    from sqlalchemy import func
+    max_badge_result = await session.execute(
+        select(func.max(BadgeAchievement.badge_id))
+    )
+    max_badge_id = max_badge_result.scalar() or 0
+
+    # Also consider the max from BADGE_DEFINITIONS
+    max_defined_id = max(BADGE_DEFINITIONS.keys()) if BADGE_DEFINITIONS else 0
+
+    # Use the larger of the two and increment
+    badge_id = max(max_badge_id, max_defined_id) + 1
 
     badge = BadgeAchievement(
         user_id=user_id,
