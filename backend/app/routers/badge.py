@@ -203,6 +203,9 @@ async def reset_user_badges(
     from ..models.badge_achievement import BadgeAchievement
     from sqlalchemy import delete
 
+    if user_data["user_id"] != user_id and not user_data.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     result = await session.execute(
         select(User).where(User.id == user_id)
     )
