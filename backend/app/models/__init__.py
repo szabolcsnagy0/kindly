@@ -1,4 +1,5 @@
 from .application import Application, ApplicationStatus
+from .badge_achievement import BadgeAchievement
 from .base import Base
 from .quest import Quest
 from .refresh_token import RefreshToken
@@ -11,6 +12,7 @@ __all__ = [
     "Base",
     "Application",
     "ApplicationStatus",
+    "BadgeAchievement",
     "Quest",
     "Request",
     "RequestStatus",
