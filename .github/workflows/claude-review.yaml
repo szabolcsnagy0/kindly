@@ -149,7 +149,9 @@ jobs:
 
           Start immediately with:
 
-          ## ✅ Approved
+          ## 🕵️‍♂️ Claude Review
+
+          ✅ **Approved**
 
           **Summary**
           2–3 concise sentences describing what changed and confirming the PR is production-ready.
@@ -158,7 +160,7 @@ jobs:
 
           Start immediately with:
 
-          ## ⚠️ Issues Found
+          ## 🕵️‍♂️ Claude Review
 
           Then a markdown table:
 
@@ -169,7 +171,9 @@ jobs:
 
           ### Output Rules (MANDATORY)
 
-          - Start immediately with ## ⚠️ Issues Found
+          - Start immediately with ## 🕵️‍♂️ Claude Review
+          - If issues found: table starts on the next line after the header (no text between)
+          - If approved: ✅ **Approved** text followed by summary
           - No text before or after the formatted output
           - Use markdown table format with 6 columns: #, Severity, Category, Location, Issue, Fix
           - One issue per table row
