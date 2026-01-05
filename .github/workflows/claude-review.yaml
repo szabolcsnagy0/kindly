@@ -39,14 +39,12 @@ jobs:
       - name: Checkout PR Code
         uses: actions/checkout@v4
         with:
-          # Checkout the head of the PR branch
           ref: refs/pull/${{ env.GITHUB_PR_NUMBER }}/head
-          # Fetch full history (depth: 0) so the agent can compare against main
           fetch-depth: 0
 
       - name: Post Start Comment
         id: initial-comment
-        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043
         with:
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
@@ -93,167 +91,104 @@ jobs:
           BASE_BRANCH: ${{ steps.get-base.outputs.base_branch }}
         run: |
           cat << EOF > audit_instructions.md
-          # Role: Senior Engineering Architect & Code Auditor
+          # Role
+          You are a senior software engineer performing a professional code review.
 
-          **Objective:** Perform an exhaustive, professional code review of this Pull Request against the \`${BASE_BRANCH}\` branch.
+          # Objective
+          Review this Pull Request by comparing the final code state on this branch against the base branch: `${BASE_BRANCH}`.
+          Review the **final state only**. Ignore issues that existed in earlier commits but were fixed later in the same PR.
 
-          **Prime Directive:** Be thorough but precise. Flag real issues with clear justification. If code is production-ready, say so clearly.
+          ## Review Process (MANDATORY)
 
-          ## Phase 1: Comprehensive Context Gathering
+          You MUST do the following before reporting any issue:
 
-          **CRITICAL:** All git commands MUST use \`--no-pager\`. Never trigger interactive shells.
-
-          **CRITICAL:** This PR may contain MULTIPLE commits. You are reviewing the FINAL STATE of the code after ALL commits have been applied. Do NOT report issues that were introduced in early commits but fixed in later commits within the same PR.
-
-          1. **Understand PR Structure:**
+          1. Identify all commits in this PR:
              ```bash
              git --no-pager log origin/${BASE_BRANCH}..HEAD --oneline
              ```
-             - See how many commits are in this PR
-             - Understand if there were progressive fixes
 
-          2. **Get Complete Diff (for context only):**
-             ```bash
-             git --no-pager diff origin/${BASE_BRANCH}...HEAD
-             ```
-             - This shows the NET changes from ${BASE_BRANCH} to HEAD
-             - Use this to understand WHAT areas of code changed
-             - **DO NOT** report issues based solely on this diff
-
-          3. **Identify All Changed Files:**
+          2. Identify all changed files:
              ```bash
              git --no-pager diff --name-status origin/${BASE_BRANCH}...HEAD
              ```
 
-          4. **MANDATORY: Read and Verify FINAL State:**
-             - **YOU MUST** use the Read tool to get the COMPLETE final contents of EVERY changed file
-             - **YOU MUST** verify every potential issue against the ACTUAL current code
-             - The diff may show problematic code that was later fixed
-             - **ONLY** report issues that exist in the final file state after reading it
-             - **DO NOT** report an issue unless you've confirmed it exists by reading the actual file
+          3. For EVERY changed file:
+             - Read the complete final file contents
+             - Verify that each reported issue exists in the final version
+             - Do NOT rely on diffs alone
 
-          5. **Read Related Context:**
-             - For each new file, understand its purpose in the broader architecture
-             - Identify corresponding test files and read them fully
-             - Look for related files that might be affected (imports, dependencies)
+          4. Use --no-pager for ALL git commands.
 
-          6. **Understand the Change:**
-             - What problem is being solved?
-             - What is the scope of impact?
-             - Are there related changes that should have been included?
+          5. Do NOT open interactive shells.
 
-          ## Phase 2: Multi-Dimensional Analysis
+          ## Final-State Verification Rule (MANDATORY)
 
-          Evaluate the changes across ALL dimensions below. Think critically about each.
+          Only report issues that you have verified in the final version of the code on this branch.
+          Do NOT report issues based solely on diffs, earlier commits, or assumptions.
 
-          **Security (BLOCKING)**
-          - Secrets & Credentials: Any hardcoded API keys, tokens, passwords, or sensitive data?
-          - Injection Vulnerabilities: SQL injection, command injection, XSS, path traversal?
-          - Input Validation: Are all external inputs (API payloads, user input, file uploads) validated?
-          - Authentication & Authorization: Are security boundaries properly enforced?
-          - Dependency Security: Any new dependencies with known vulnerabilities?
+          When an issue depends on surrounding context (tests, imports, contracts), inspect only the files necessary to confirm it.
 
-          **Architecture & Scaling**
-          - Scalability: Will this work at 10x, 100x current load?
-          - Database Performance: Are there N+1 queries, missing indexes, or table scans?
-          - Memory & Resource Usage: Any memory leaks, unbounded collections, or resource exhaustion risks?
-          - Architectural Consistency: Does this fit the existing system design patterns?
-          - Service Boundaries: Are responsibilities properly separated?
+          ## Review Criteria
 
-          **Correctness & Robustness**
-          - Error Handling: Are all error paths handled? Any swallowed errors?
-          - Edge Cases: Null, undefined, empty arrays, boundary conditions, race conditions?
-          - Async Safety: All Promises awaited? Proper async/await usage?
-          - Data Integrity: Can this cause data corruption or inconsistency?
-          - Concurrency: Thread-safe? Handles concurrent requests properly?
+          Evaluate the changes across these dimensions:
+          - Security: secrets, injection risks, authentication, unsafe inputs
+          - Correctness: bugs, async issues, edge cases
+          - Performance: N+1 queries, unnecessary work, scaling risks
+          - Architecture: design consistency, responsibility boundaries
+          - Testing: missing coverage, weak assertions, untested paths
+          - Quality: readability, duplication, complexity, debug artifacts
 
-          **Consistency & Maintainability**
-          - Code Style: Consistent with the existing codebase patterns?
-          - Naming: Clear, descriptive, following project conventions?
-          - Complexity: Is the solution as simple as it can be, or over-engineered?
-          - Duplication: Is there existing code that does something similar?
-          - Magic Numbers/Strings: Are constants properly named and documented?
-          - Technical Debt: Does this add debt, or reduce it?
+          Only report real, concrete issues that require developer action.
 
-          **Failure Modes & Graceful Degradation**
-          - Failure Impact: What happens when this code fails? Does it cascade?
-          - Graceful Degradation: Can the system continue operating in a degraded state?
-          - Rollback Safety: Can this change be safely rolled back?
-          - Monitoring & Observability: Can failures be detected and diagnosed?
-          - Retry Logic: Appropriate backoff and retry strategies?
+          ## Output Format (STRICT – FOLLOW EXACTLY)
 
-          **Trap-Door Decisions**
-          - Irreversible Choices: Are there decisions that will be hard to change later?
-          - API Contracts: Are new APIs well-designed? Versioned if public?
-          - Database Migrations: Are schema changes backwards compatible?
-          - Breaking Changes: Any breaking changes to existing contracts?
+          Your response MUST be the formatted output only.
+          Do NOT include explanations, preambles, or extra text.
 
-          **Testing & Coverage**
-          - Test Coverage: Are all new code paths tested?
-          - Negative Tests: Are error paths and edge cases tested?
-          - Integration Tests: Are interactions with other systems tested?
-          - Test Quality: Are assertions specific and meaningful (not .any())?
-          - Flakiness Risk: Are tests deterministic and reliable?
+          ### If no significant issues are found:
 
-          **Complexity & Code Quality**
-          - Cyclomatic Complexity: Is the code easy to understand?
-          - Nesting Depth: Too many nested conditionals or callbacks?
-          - Function Length: Are functions focused and reasonably sized?
-          - Debug Artifacts: Any console.log, debugger, or commented code?
-          - Documentation: Are complex algorithms or business logic explained?
+          Start immediately with:
 
-          ## Phase 3: Output Format (STRICT)
+          ## ✅ Approved
 
-          **CRITICAL:** Your response must start IMMEDIATELY with either "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
+          **Summary**
+          2–3 concise sentences describing what changed and confirming the PR is production-ready.
 
-          DO NOT include:
-          - Any conversational text or preamble
-          - Phrases like "Perfect!", "Let me analyze...", "Based on my review..."
-          - Any text before the ## heading
-          - Any explanatory text after the formatted output
-          - **ANY section headers or groupings** like "Security Issues:", "Testing Issues:", "Code Quality Issues:"
-          - Any markdown headings other than the main "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
-          - Any blank lines between issues in the numbered list
+          ### If issues are found:
 
-          ### If No Significant Issues
+          Start immediately with:
 
-          ```markdown
-          ## ✅ APPROVED
+          ## ⚠️ Issues Found
 
-          **Summary:** [2-3 sentences describing what changed and confirming it's production-ready]
+          Then a markdown table:
 
-          No significant issues found. Changes reviewed for security, architecture, correctness, testing, and code quality.
-          ```
+          | # | Severity | Category | Location | Issue | Fix |
+          |---|----------|----------|----------|-------|-----|
+          | 1 | 🔴 HIGH / 🟡 MED / 🟢 LOW | Security / Correctness / etc | path/to/file.ext:lineNumber | Brief description of what's wrong | Actionable fix suggestion |
+          | 2 | (emoji + severity level) | (issue category) | (file:line) | (problem description) | (how to resolve) |
 
-          ### If Issues Found
+          ### Output Rules (MANDATORY)
 
-          **CRITICAL FORMAT:** The output must be EXACTLY as shown below - a flat numbered list with NO section headers.
+          - Start immediately with ## ⚠️ Issues Found
+          - No text before or after the formatted output
+          - Use markdown table format with 6 columns: #, Severity, Category, Location, Issue, Fix
+          - One issue per table row
+          - No section headers or grouping
+          - Keep Issue and Fix columns concise (1 short sentence each)
 
-          ```markdown
-          ## ⚠️ ISSUES FOUND
+          ### Severity Format
+          - 🔴 HIGH - Critical security, data loss, or system-breaking issues
+          - 🟡 MED - Important bugs, performance issues, or design problems
+          - 🟢 LOW - Code quality, minor improvements, style issues
 
-          1. **[Security] file.ts:123** - SQL injection in database query - Use parameterized queries
-          2. **[Correctness] handler.ts:45** - Missing await on async function - Add await keyword
-          3. **[Testing] service.test.ts:89** - Weak assertion using .any() - Use specific expected values
-          4. **[Performance] api.ts:67** - N+1 query in loop - Use batch loading
-          5. **[Quality] utils.ts:12** - Console.log in production code - Remove or use logger
-          ```
+          ### Allowed Categories
+          Security, Correctness, Performance, Architecture, Testing, Quality
 
-          **Format Rules (MANDATORY):**
-          - Your ENTIRE response must be ONLY the formatted output above
-          - Start immediately with "## ⚠️ ISSUES FOUND" on line 1
-          - Line 2 must be blank
-          - Line 3+ is the numbered list starting with "1. "
-          - **ABSOLUTELY NO section headers** like "Security Issues", "Testing Issues", etc.
-          - **FLAT NUMBERED LIST ONLY** - issues should be numbered 1, 2, 3, 4, 5... continuously
-          - One line per issue: \`**[Category] file:line** - problem description - suggested fix\`
-          - Categories: Security, Performance, Correctness, Architecture, Testing, Quality
-          - Keep each issue to one line, be concise
-          - No sub-bullets, no Impact sections, no detailed explanations
-          - No executive summary, no overall assessment sections
-          - No grouping by category
-          - No conversational text before or after
-          - Just the heading, blank line, and flat numbered list
+          ### Table Format Notes
+          - Use emoji + severity text in Severity column (e.g., "🔴 HIGH")
+          - Location should be relative file path with line number (e.g., "backend/services/auth.py:42")
+          - Issue column: brief description of the problem
+          - Fix column: actionable suggestion to resolve it
           EOF
 
       - name: Run Claude Review
