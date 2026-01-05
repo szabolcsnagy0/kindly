@@ -54,17 +54,31 @@ jobs:
 
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-      - name: Fetch Main Branch
-        run: git fetch origin main
+      - name: Get PR Base Branch
+        id: get-base
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('base_branch', pr.data.base.ref);
+            return pr.data.base.ref;
+
+      - name: Fetch Base Branch
+        run: git fetch origin ${{ steps.get-base.outputs.base_branch }}
 
       - name: Validate PR Has Changes
         run: |
-          CHANGES=$(git --no-pager diff --name-only origin/main...HEAD | wc -l)
+          BASE_BRANCH="origin/${{ steps.get-base.outputs.base_branch }}"
+          CHANGES=$(git --no-pager diff --name-only ${BASE_BRANCH}...HEAD | wc -l)
           if [ "$CHANGES" -eq 0 ]; then
             echo "No changes detected in this PR"
             exit 1
           fi
-          echo "Found $CHANGES changed files"
+          echo "Found $CHANGES changed files against base branch: ${{ steps.get-base.outputs.base_branch }}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -75,35 +89,55 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Create Audit Instructions
+        env:
+          BASE_BRANCH: ${{ steps.get-base.outputs.base_branch }}
         run: |
-          cat << 'EOF' > audit_instructions.md
+          cat << EOF > audit_instructions.md
           # Role: Senior Engineering Architect & Code Auditor
 
-          **Objective:** Perform an exhaustive, professional code review of this Pull Request against main branch.
+          **Objective:** Perform an exhaustive, professional code review of this Pull Request against the \`${BASE_BRANCH}\` branch.
 
           **Prime Directive:** Be thorough but precise. Flag real issues with clear justification. If code is production-ready, say so clearly.
 
           ## Phase 1: Comprehensive Context Gathering
 
-          **CRITICAL:** All git commands MUST use `--no-pager`. Never trigger interactive shells.
+          **CRITICAL:** All git commands MUST use \`--no-pager\`. Never trigger interactive shells.
 
-          1. **Get Complete Diff:**
+          **CRITICAL:** This PR may contain MULTIPLE commits. You are reviewing the FINAL STATE of the code after ALL commits have been applied. Do NOT report issues that were introduced in early commits but fixed in later commits within the same PR.
+
+          1. **Understand PR Structure:**
              ```bash
-             git --no-pager diff origin/main...HEAD
+             git --no-pager log origin/${BASE_BRANCH}..HEAD --oneline
+             ```
+             - See how many commits are in this PR
+             - Understand if there were progressive fixes
+
+          2. **Get Complete Diff (for context only):**
+             ```bash
+             git --no-pager diff origin/${BASE_BRANCH}...HEAD
+             ```
+             - This shows the NET changes from ${BASE_BRANCH} to HEAD
+             - Use this to understand WHAT areas of code changed
+             - **DO NOT** report issues based solely on this diff
+
+          3. **Identify All Changed Files:**
+             ```bash
+             git --no-pager diff --name-status origin/${BASE_BRANCH}...HEAD
              ```
 
-          2. **Identify All Changed Files:**
-             ```bash
-             git --no-pager diff --name-status origin/main...HEAD
-             ```
+          4. **MANDATORY: Read and Verify FINAL State:**
+             - **YOU MUST** use the Read tool to get the COMPLETE final contents of EVERY changed file
+             - **YOU MUST** verify every potential issue against the ACTUAL current code
+             - The diff may show problematic code that was later fixed
+             - **ONLY** report issues that exist in the final file state after reading it
+             - **DO NOT** report an issue unless you've confirmed it exists by reading the actual file
 
-          3. **Read Full Context:**
-             - For each modified file, use Read tool to get COMPLETE file contents
+          5. **Read Related Context:**
              - For each new file, understand its purpose in the broader architecture
              - Identify corresponding test files and read them fully
              - Look for related files that might be affected (imports, dependencies)
 
-          4. **Understand the Change:**
+          6. **Understand the Change:**
              - What problem is being solved?
              - What is the scope of impact?
              - Are there related changes that should have been included?
@@ -177,6 +211,9 @@ jobs:
           - Phrases like "Perfect!", "Let me analyze...", "Based on my review..."
           - Any text before the ## heading
           - Any explanatory text after the formatted output
+          - **ANY section headers or groupings** like "Security Issues:", "Testing Issues:", "Code Quality Issues:"
+          - Any markdown headings other than the main "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
+          - Any blank lines between issues in the numbered list
 
           ### If No Significant Issues
 
@@ -190,24 +227,33 @@ jobs:
 
           ### If Issues Found
 
+          **CRITICAL FORMAT:** The output must be EXACTLY as shown below - a flat numbered list with NO section headers.
+
           ```markdown
           ## ⚠️ ISSUES FOUND
 
           1. **[Security] file.ts:123** - SQL injection in database query - Use parameterized queries
           2. **[Correctness] handler.ts:45** - Missing await on async function - Add await keyword
           3. **[Testing] service.test.ts:89** - Weak assertion using .any() - Use specific expected values
+          4. **[Performance] api.ts:67** - N+1 query in loop - Use batch loading
+          5. **[Quality] utils.ts:12** - Console.log in production code - Remove or use logger
           ```
 
-          **Format Rules:**
+          **Format Rules (MANDATORY):**
           - Your ENTIRE response must be ONLY the formatted output above
-          - Start immediately with "## ✅ APPROVED" or "## ⚠️ ISSUES FOUND"
-          - One line per issue: `**[Category] file:line** - problem description - suggested fix`
+          - Start immediately with "## ⚠️ ISSUES FOUND" on line 1
+          - Line 2 must be blank
+          - Line 3+ is the numbered list starting with "1. "
+          - **ABSOLUTELY NO section headers** like "Security Issues", "Testing Issues", etc.
+          - **FLAT NUMBERED LIST ONLY** - issues should be numbered 1, 2, 3, 4, 5... continuously
+          - One line per issue: \`**[Category] file:line** - problem description - suggested fix\`
           - Categories: Security, Performance, Correctness, Architecture, Testing, Quality
           - Keep each issue to one line, be concise
           - No sub-bullets, no Impact sections, no detailed explanations
           - No executive summary, no overall assessment sections
+          - No grouping by category
           - No conversational text before or after
-          - Just the formatted output, nothing else
+          - Just the heading, blank line, and flat numbered list
           EOF
 
       - name: Run Claude Review
