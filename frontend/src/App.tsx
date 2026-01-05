@@ -11,16 +11,28 @@ import { EditProfilePage } from "./pages/EditProfilePage";
 import { MyBadgesPage } from "./pages/MyBadgesPage";
 import { BadgeLeaderboardPage } from "./pages/BadgeLeaderboardPage";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { BadgeNotification } from "./components/badges/BadgeNotification";
 import { initializeTokenRefresh } from "./services/api";
+import { useBadgeNotifications } from "./hooks/useBadgeNotifications";
 
 function App() {
+  const { newBadges, dismissBadge } = useBadgeNotifications();
+
   useEffect(() => {
     // Initialize proactive token refresh on app mount
     initializeTokenRefresh();
   }, []);
 
   return (
-    <Routes>
+    <>
+      {newBadges.map((badge, index) => (
+        <BadgeNotification
+          key={badge.id}
+          badge={badge}
+          onClose={() => dismissBadge(badge.id)}
+        />
+      ))}
+      <Routes>
       {/* Public routes */}
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/register" element={<RegisterPage />} />
@@ -48,6 +60,7 @@ function App() {
       {/* Fallback for unknown routes */}
       <Route path="*" element={<Navigate to="/requests" replace />} />
     </Routes>
+    </>
   );
 }
 

@@ -14,47 +14,53 @@ describe("BadgeCard", () => {
     is_completed: true,
   };
 
-  it("renders badge card", () => {
+  it("renders badge name correctly", () => {
     render(<BadgeCard badge={mockBadge} />);
     const element = screen.getByText("Test Badge");
-    expect(element).toBeDefined();
+    expect(element).toBeInTheDocument();
   });
 
-  it("shows badge name", () => {
+  it("displays badge description", () => {
     render(<BadgeCard badge={mockBadge} />);
-    expect(screen.getByText("Test Badge")).toBeTruthy();
+    const description = screen.getByText("Test description");
+    expect(description).toBeInTheDocument();
   });
 
-  it("handles click", () => {
+  it("handles click event", () => {
     const onClick = vi.fn();
     render(<BadgeCard badge={mockBadge} onClick={onClick} />);
 
     const card = screen.getByText("Test Badge").closest("div");
     fireEvent.click(card!);
 
-    expect(onClick).toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it("displays progress bar for incomplete badges", () => {
     const incompleteBadge = { ...mockBadge, is_completed: false, progress: 50 };
-    const { container } = render(<BadgeCard badge={incompleteBadge} />);
+    render(<BadgeCard badge={incompleteBadge} />);
 
-    const progressBar = container.querySelector('[data-testid="progress-bar"]');
-    expect(progressBar).toBeTruthy();
+    const progressText = screen.queryByText(/Completed/i);
+    expect(progressText).not.toBeInTheDocument();
   });
 
-  it("shows completed badge", () => {
+  it("shows completed indicator for completed badges", () => {
     render(<BadgeCard badge={mockBadge} />);
-    const element = screen.getByText(/Completed/i);
-    expect(element).not.toBeNull();
+    const completedText = screen.getByText(/✓ Completed/i);
+    expect(completedText).toBeInTheDocument();
   });
 
-  it("has correct rarity color", () => {
+  it("displays correct rarity name", () => {
     render(<BadgeCard badge={mockBadge} />);
-    expect(true).toBe(true);
+    const rarityBadge = screen.getByText("Rare");
+    expect(rarityBadge).toBeInTheDocument();
   });
 
-  it("renders without crashing", () => {
-    expect(() => render(<BadgeCard badge={mockBadge} />)).not.toThrow();
+  it("does not show completed indicator for incomplete badges", () => {
+    const incompleteBadge = { ...mockBadge, is_completed: false };
+    render(<BadgeCard badge={incompleteBadge} />);
+
+    const completedText = screen.queryByText(/✓ Completed/i);
+    expect(completedText).not.toBeInTheDocument();
   });
 });

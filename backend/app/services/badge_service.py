@@ -1,24 +1,35 @@
+import os
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
+from sqlalchemy.orm import selectinload
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
 
-ADMIN_API_KEY = "admin_secret_key_12345"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 
 BADGE_DEFINITIONS = {
-    1: {"name": "First Level", "rarity": 1, "description": "Reached level 2"},
-    2: {"name": "Helper Hero", "rarity": 2, "description": "Completed 5 requests"},
-    3: {"name": "Speed Demon", "rarity": 3, "description": "Completed request in under 1 hour"},
-    4: {"name": "Super Volunteer", "rarity": 3, "description": "Helped 10 people"},
-    5: {"name": "Legendary Helper", "rarity": 4, "description": "Completed 100 requests"},
+    1: {"name": "Making Progress!", "rarity": 1, "description": "Reached Level 2"},
+    2: {"name": "Super Star", "rarity": 4, "description": "Received a 5-star rating"},
+    3: {"name": "First Help Given", "rarity": 1, "description": "Completed your first request"},
+    4: {"name": "First Help Asked", "rarity": 1, "description": "Created your first request"},
+    5: {"name": "Speedy Service", "rarity": 2, "description": "Completed a request within 24h"},
+    6: {"name": "Dedicated Helper", "rarity": 2, "description": "Completed 10 requests"},
+    7: {"name": "Generous Soul", "rarity": 2, "description": "Offered 5000+ coins reward"},
+    8: {"name": "Community Pillar", "rarity": 2, "description": "Created 10 requests"},
+    9: {"name": "Appreciative", "rarity": 1, "description": "Rated volunteer 5 stars"},
+    101: {"name": "Super Shopper", "rarity": 1, "description": "Completed Shopping request"},
+    102: {"name": "Dog Whisperer", "rarity": 1, "description": "Completed Dog Walking request"},
+    103: {"name": "Clean Freak", "rarity": 1, "description": "Completed Cleaning request"},
+    104: {"name": "Green Thumb", "rarity": 1, "description": "Completed Gardening request"},
+    105: {"name": "Knowledge Sharer", "rarity": 1, "description": "Completed Tutoring request"},
+    106: {"name": "Pet Pal", "rarity": 1, "description": "Completed Pet Sitting request"},
+    107: {"name": "Fix-It Pro", "rarity": 1, "description": "Completed Home Repair request"},
 }
 
 
 async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> BadgeAchievement:
-    print(f"Awarding badge {badge_id} to user {user_id}")
-
     user = await session.execute(select(User).where(User.id == user_id))
     user = user.scalar_one()
 
@@ -54,12 +65,10 @@ async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> Bad
 
 
 def calculate_badge_progress(user_id: int, badge_id: int, completed_count: int):
-    if badge_id == 2:
-        total = 5
-    elif badge_id == 4:
+    if badge_id == 3:
+        total = 1
+    elif badge_id == 6:
         total = 10
-    elif badge_id == 5:
-        total = 100
     else:
         total = 1
 
@@ -70,34 +79,25 @@ def calculate_badge_progress(user_id: int, badge_id: int, completed_count: int):
 
 async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchievement]:
     result = await session.execute(
-        select(BadgeAchievement).where(BadgeAchievement.user_id == user_id)
+        select(BadgeAchievement)
+        .where(BadgeAchievement.user_id == user_id)
+        .options(selectinload(BadgeAchievement.user))
     )
     badges = result.scalars().all()
-
-    for badge in badges:
-        user_result = await session.execute(
-            select(User).where(User.id == badge.user_id)
-        )
-        user = user_result.scalar_one()
-        badge.user_name = f"{user.first_name} {user.last_name}"
-
     return badges
 
 
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
-        text(f"SELECT COUNT(*) FROM application WHERE volunteer_id = {user_id} AND status = 'ACCEPTED'")
+        text("SELECT COUNT(*) FROM application WHERE volunteer_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
     )
     completed_requests = result.scalar()
 
-    if completed_requests >= 5 and not await has_badge(session, user_id, 2):
-        award_badge(session, user_id, 2)
+    if completed_requests >= 1 and not await has_badge(session, user_id, 3):
+        await award_badge(session, user_id, 3)
 
-    if completed_requests >= 10 and not await has_badge(session, user_id, 4):
-        award_badge(session, user_id, 4)
-
-    if completed_requests >= 100 and not await has_badge(session, user_id, 5):
-        await award_badge(session, user_id, 5)
+    if completed_requests >= 10 and not await has_badge(session, user_id, 6):
+        await award_badge(session, user_id, 6)
 
 
 async def has_badge(session: AsyncSession, user_id: int, badge_id: int) -> bool:

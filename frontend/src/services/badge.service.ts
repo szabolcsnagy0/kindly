@@ -5,9 +5,17 @@ import { ApiResponse } from "../types/api.types";
 const badgeCache = new Map<number, Badge[]>();
 
 export const badgeService = {
+  clearCache(userId?: number) {
+    if (userId) {
+      badgeCache.delete(userId);
+    } else {
+      badgeCache.clear();
+    }
+  },
+
   async awardBadge(request: AwardBadgeRequest): Promise<Badge> {
     const response = await api.post<ApiResponse<Badge>>("/badges/award", request);
-    console.log("Badge awarded:", response.data);
+    this.clearCache(request.user_id);
     return response.data.data;
   },
 
@@ -30,12 +38,12 @@ export const badgeService = {
   },
 
   async getLeaderboard(): Promise<LeaderboardEntry[]> {
-    const response = api.get<ApiResponse<LeaderboardEntry[]>>("/badges/leaderboard");
-    return (await response).data.data;
+    const response = await api.get<ApiResponse<LeaderboardEntry[]>>("/badges/leaderboard");
+    return response.data.data;
   },
 
   async checkAchievements() {
-    api.post("/badges/check-achievements");
+    await api.post("/badges/check-achievements");
   },
 
   async getBadgeProgress(badgeId: number): Promise<{ badge_id: number; progress: number; completed: boolean }> {

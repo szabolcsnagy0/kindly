@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
-import { Box, Heading, SimpleGrid, Text, Button, Spinner } from "@chakra-ui/react";
+import { useEffect, useState, useMemo } from "react";
+import { Box, Heading, SimpleGrid, Text, Button, Spinner, toaster } from "@chakra-ui/react";
 import { badgeService } from "../services/badge.service";
 import { Badge } from "../types/badge.types";
 import { BadgeCard } from "../components/badges/BadgeCard";
 import { useNavigate } from "react-router";
+
+const RARITY_POINTS = {
+  COMMON: 1,
+  RARE: 5,
+  EPIC: 15,
+  LEGENDARY: 50,
+} as const;
 
 export const MyBadgesPage = () => {
   const [badges, setBadges] = useState<Badge[]>([]);
@@ -17,7 +24,11 @@ export const MyBadgesPage = () => {
         setBadges(myBadges);
         setLoading(false);
       } catch (error) {
-        console.log("Error fetching badges:", error);
+        toaster.create({
+          title: "Failed to load badges",
+          description: "Please try again later",
+          type: "error",
+        });
         setLoading(false);
       }
     };
@@ -29,19 +40,15 @@ export const MyBadgesPage = () => {
   const completedBadges = badges.filter((b) => b.is_completed);
   const inProgressBadges = badges.filter((b) => !b.is_completed);
 
-  const calculateTotalRarity = () => {
-    let total = 0;
-    for (let i = 0; i < completedBadges.length; i++) {
-      const badge = completedBadges[i];
-      if (badge.rarity == 1) total += 1;
-      else if (badge.rarity == 2) total += 5;
-      else if (badge.rarity == 3) total += 15;
-      else if (badge.rarity == 4) total += 50;
-    }
-    return total;
-  };
-
-  const rarityScore = calculateTotalRarity();
+  const rarityScore = useMemo(() => {
+    return completedBadges.reduce((total, badge) => {
+      if (badge.rarity === 1) return total + RARITY_POINTS.COMMON;
+      if (badge.rarity === 2) return total + RARITY_POINTS.RARE;
+      if (badge.rarity === 3) return total + RARITY_POINTS.EPIC;
+      if (badge.rarity === 4) return total + RARITY_POINTS.LEGENDARY;
+      return total;
+    }, 0);
+  }, [completedBadges]);
 
   if (loading) {
     return (

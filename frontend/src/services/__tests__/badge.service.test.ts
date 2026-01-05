@@ -9,7 +9,7 @@ describe("badgeService", () => {
     vi.clearAllMocks();
   });
 
-  it("awards badge", async () => {
+  it("awards badge and returns badge data", async () => {
     const mockResponse = {
       data: {
         success: true,
@@ -28,11 +28,18 @@ describe("badgeService", () => {
 
     const result = await badgeService.awardBadge({ user_id: 1, badge_id: 2 });
 
-    expect(result).toBeDefined();
-    expect(result.badge_id).toBe(2);
+    expect(result).toEqual({
+      id: 1,
+      badge_id: 2,
+      badge_name: "Test",
+      rarity: 1,
+      progress: 100,
+      is_completed: true,
+    });
+    expect(api.post).toHaveBeenCalledWith("/badges/award", { user_id: 1, badge_id: 2 });
   });
 
-  it("gets user badges", async () => {
+  it("gets user badges and returns array", async () => {
     const mockBadges = [
       { id: 1, badge_id: 1, badge_name: "Badge1", rarity: 1, progress: 100, is_completed: true },
       { id: 2, badge_id: 2, badge_name: "Badge2", rarity: 2, progress: 100, is_completed: true },
@@ -44,12 +51,15 @@ describe("badgeService", () => {
 
     const result = await badgeService.getUserBadges(1);
 
-    expect(result.length).toBeGreaterThan(0);
+    expect(result).toHaveLength(2);
+    expect(result[0].badge_name).toBe("Badge1");
+    expect(result[1].rarity).toBe(2);
   });
 
-  it("gets leaderboard", async () => {
+  it("gets leaderboard with correct structure", async () => {
     const mockLeaderboard = [
       { user_id: 1, name: "User1", badge_count: 5, legendary_count: 1 },
+      { user_id: 2, name: "User2", badge_count: 3, legendary_count: 0 },
     ];
 
     vi.mocked(api.get).mockResolvedValue({
@@ -58,38 +68,52 @@ describe("badgeService", () => {
 
     const result = await badgeService.getLeaderboard();
 
-    expect(result).toEqual(expect.any(Array));
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({
+      user_id: 1,
+      name: "User1",
+      badge_count: 5,
+      legendary_count: 1,
+    });
   });
 
-  it("checks achievements", async () => {
+  it("checks achievements and calls API", async () => {
     vi.mocked(api.post).mockResolvedValue({ data: { success: true } });
 
-    badgeService.checkAchievements();
+    await badgeService.checkAchievements();
 
-    expect(api.post).toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith("/badges/check-achievements");
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 
-  it("returns rarity color", () => {
-    const color1 = badgeService.getRarityColor(1);
-    const color2 = badgeService.getRarityColor(2);
-
-    expect(color1).toBe("#808080");
-    expect(color2).not.toBe(color1);
+  it("returns correct rarity colors", () => {
+    expect(badgeService.getRarityColor(1)).toBe("#808080");
+    expect(badgeService.getRarityColor(2)).toBe("#4169E1");
+    expect(badgeService.getRarityColor(3)).toBe("#9B30FF");
+    expect(badgeService.getRarityColor(4)).toBe("#FFD700");
+    expect(badgeService.getRarityColor(999)).toBe("#000000");
   });
 
-  it("returns rarity name", () => {
-    const name = badgeService.getRarityName(1);
-    expect(name).toBeTruthy();
+  it("returns correct rarity names", () => {
+    expect(badgeService.getRarityName(1)).toBe("Common");
+    expect(badgeService.getRarityName(2)).toBe("Rare");
+    expect(badgeService.getRarityName(3)).toBe("Epic");
+    expect(badgeService.getRarityName(4)).toBe("Legendary");
   });
 
-  it("handles badge progress", async () => {
+  it("gets badge progress with correct data", async () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { success: true, data: { badge_id: 1, progress: 50, completed: false } },
     });
 
     const result = await badgeService.getBadgeProgress(1);
 
-    expect(result.progress).toBeLessThanOrEqual(100);
+    expect(result).toEqual({
+      badge_id: 1,
+      progress: 50,
+      completed: false,
+    });
+    expect(api.get).toHaveBeenCalledWith("/badges/progress/1");
   });
 
   it("caches user badges", async () => {
