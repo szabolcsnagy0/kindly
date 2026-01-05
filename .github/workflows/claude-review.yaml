@@ -130,22 +130,41 @@ jobs:
 
           ## Review Criteria
 
-          Evaluate the changes across these dimensions:
-          - Security: secrets, injection risks, authentication, unsafe inputs
-          - Correctness: bugs, async issues, edge cases
-          - Performance: N+1 queries, unnecessary work, scaling risks
-          - Architecture: design consistency, responsibility boundaries
-          - Testing: missing coverage, weak assertions, untested paths
-          - Quality: readability, duplication, complexity, debug artifacts
+          Evaluate ALL changes across these dimensions:
 
-          Only report real, concrete issues that require developer action.
+          1. **Security**: Secrets exposure, injection risks, authentication/authorization, unsafe input handling
+          2. **Correctness**: Logic errors, bugs, async/await issues, missing edge cases, wrong assumptions
+          3. **Performance & Scaling**: N+1 queries, memory leaks, inefficient algorithms, scaling bottlenecks
+          4. **Architecture**: Consistency with existing patterns, separation of concerns, maintainability
+          5. **Extensibility**: Trap-door decisions, hard-coded values, tight coupling that limits future changes
+          6. **Testing**: Missing test coverage for critical paths, weak assertions, untested edge cases, test quality
+          7. **Code Quality**: Readability, duplication, unnecessary complexity, inconsistent style
+          8. **Edge Cases**: Error handling, boundary conditions, race conditions, null/undefined handling
+
+          ## Approval Criteria
+
+          After evaluating all dimensions above, APPROVE if:
+          - No security vulnerabilities found
+          - No correctness bugs found
+          - No missing tests for critical functionality
+          - No obvious performance problems
+          - Code follows existing patterns reasonably well
+          - Changes are maintainable and extensible
+
+          **You do NOT need perfect code to approve.** Approve if the PR is:
+          - Safe to deploy
+          - Reasonably well-tested
+          - Maintainable by the team
+          - Consistent with codebase standards
+
+          **Only report issues that genuinely improve the PR.** If you've checked all dimensions and found nothing significant, APPROVE with confidence.
 
           ## Output Format (STRICT – FOLLOW EXACTLY)
 
           Your response MUST be the formatted output only.
           Do NOT include explanations, preambles, or extra text.
 
-          ### If no significant issues are found:
+          ### If approval criteria are met (EXPECTED outcome):
 
           Start immediately with:
 
@@ -162,7 +181,7 @@ jobs:
 
           ## 🕵️‍♂️ Claude Review
 
-          Then a markdown table:
+          Then immediately a markdown table (no text between) with the following columns:
 
           | # | Severity | Category | Location | Issue | Fix |
           |---|----------|----------|----------|-------|-----|
