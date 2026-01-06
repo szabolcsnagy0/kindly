@@ -44,7 +44,7 @@ jobs:
 
       - name: Post Start Comment
         id: initial-comment
-        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043
+        uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
@@ -52,8 +52,8 @@ jobs:
 
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-      - name: Get PR Base Branch
-        id: get-base
+      - name: Get PR Details
+        id: get-pr-details
         uses: actions/github-script@v7
         with:
           script: |
@@ -63,20 +63,75 @@ jobs:
               pull_number: context.issue.number
             });
             core.setOutput('base_branch', pr.data.base.ref);
+            core.setOutput('head_sha', pr.data.head.sha);
             return pr.data.base.ref;
 
       - name: Fetch Base Branch
-        run: git fetch origin ${{ steps.get-base.outputs.base_branch }}
+        run: git fetch origin ${{ steps.get-pr-details.outputs.base_branch }}
 
-      - name: Validate PR Has Changes
+      - name: Get Previous Review State
+        id: get-state
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find last comment by bot that contains a review SHA
+            // We look for the hidden comment format <!-- review-sha: SHA -->
+            const botComments = comments.data
+              .filter(c => c.user.type === 'Bot' && c.body.includes('<!-- review-sha:'))
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+            const lastComment = botComments.length > 0 ? botComments[botComments.length - 1] : null;
+
+            if (lastComment) {
+              const match = lastComment.body.match(/<!-- review-sha: (\w+) -->/);
+              if (match) {
+                console.log(`Found previous review SHA: ${match[1]}`);
+                core.setOutput('previous_sha', match[1]);
+
+                // Export the body as context for the prompt
+                // Using multiline delimiter for safety
+                core.exportVariable('PREVIOUS_REVIEW_CONTEXT', lastComment.body);
+                return;
+              }
+            }
+
+            console.log('No previous valid review found.');
+            core.setOutput('previous_sha', '');
+            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous review found.');
+
+      - name: Determine Review Mode & Diff Base
+        id: determine-mode
         run: |
-          BASE_BRANCH="origin/${{ steps.get-base.outputs.base_branch }}"
-          CHANGES=$(git --no-pager diff --name-only ${BASE_BRANCH}...HEAD | wc -l)
-          if [ "$CHANGES" -eq 0 ]; then
-            echo "No changes detected in this PR"
-            exit 1
+          PREV_SHA="${{ steps.get-state.outputs.previous_sha }}"
+          BASE_REF="origin/${{ steps.get-pr-details.outputs.base_branch }}"
+
+          # Check if PREV_SHA is valid and exists in the current history (wasn't force-pushed away)
+          if [ -n "$PREV_SHA" ] && git cat-file -t "$PREV_SHA" > /dev/null 2>&1; then
+            echo "Review Mode: INCREMENTAL"
+            echo "REVIEW_MODE=INCREMENTAL" >> $GITHUB_ENV
+            echo "DIFF_BASE=$PREV_SHA" >> $GITHUB_ENV
+          else
+            echo "Review Mode: FULL"
+            echo "REVIEW_MODE=FULL" >> $GITHUB_ENV
+            echo "DIFF_BASE=$BASE_REF" >> $GITHUB_ENV
           fi
-          echo "Found $CHANGES changed files against base branch: ${{ steps.get-base.outputs.base_branch }}"
+
+      - name: Validate Changes
+        run: |
+          CHANGES=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
+          if [ "$CHANGES" -eq 0 ]; then
+            echo "No changes detected against ${{ env.DIFF_BASE }}"
+            # We don't exit here for Incremental, as we might want to verify things,
+            # but usually it's safe to stop.
+            exit 0
+          fi
+          echo "Found $CHANGES changed files."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -89,17 +144,28 @@ jobs:
       - name: Run Claude Review
         id: review
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BASE_BRANCH: ${{ steps.get-base.outputs.base_branch }}
           CI: true
+          # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT are already in env
         run: |
-          claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md
+          # We capture stderr (logs) to claude_trace.txt and stdout (report) to review_report.md
+          claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md 2> claude_trace.txt
+
+          # Print the trace to console for immediate debugging
+          echo "=== CLAUDE TRACE LOGS ==="
+          cat claude_trace.txt
+
+      - name: Append State to Report
+        if: ${{ steps.review.outcome == 'success' }}
+        run: |
+          echo "" >> review_report.md
+          echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> review_report.md
 
       - name: Post Success Comment
         if: ${{ steps.review.outcome == 'success' }}
-        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
+        uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
@@ -108,7 +174,7 @@ jobs:
 
       - name: Post Failure Comment
         if: ${{ steps.review.outcome == 'failure' }}
-        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # 4.0.0
+        uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
