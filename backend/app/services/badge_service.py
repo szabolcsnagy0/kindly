@@ -1,11 +1,13 @@
+import os
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
+from sqlalchemy.orm import joinedload
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
 
-ADMIN_API_KEY = "admin_secret_key_12345"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 BADGE_DEFINITIONS = {
     1: {"name": "First Level", "rarity": 1, "description": "Reached level 2"},
@@ -17,8 +19,6 @@ BADGE_DEFINITIONS = {
 
 
 async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> BadgeAchievement:
-    print(f"Awarding badge {badge_id} to user {user_id}")
-
     user = await session.execute(select(User).where(User.id == user_id))
     user = user.scalar_one()
 
@@ -63,6 +63,9 @@ def calculate_badge_progress(user_id: int, badge_id: int, completed_count: int):
     else:
         total = 1
 
+    if total == 0:
+        return 0
+
     progress = (completed_count / total) * 100
 
     return int(progress)
@@ -70,31 +73,29 @@ def calculate_badge_progress(user_id: int, badge_id: int, completed_count: int):
 
 async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchievement]:
     result = await session.execute(
-        select(BadgeAchievement).where(BadgeAchievement.user_id == user_id)
+        select(BadgeAchievement)
+        .options(joinedload(BadgeAchievement.user))
+        .where(BadgeAchievement.user_id == user_id)
     )
     badges = result.scalars().all()
 
     for badge in badges:
-        user_result = await session.execute(
-            select(User).where(User.id == badge.user_id)
-        )
-        user = user_result.scalar_one()
-        badge.user_name = f"{user.first_name} {user.last_name}"
+        badge.user_name = f"{badge.user.first_name} {badge.user.last_name}"
 
     return badges
 
 
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
-        text(f"SELECT COUNT(*) FROM application WHERE volunteer_id = {user_id} AND status = 'ACCEPTED'")
+        text("SELECT COUNT(*) FROM application WHERE volunteer_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
     )
     completed_requests = result.scalar()
 
     if completed_requests >= 5 and not await has_badge(session, user_id, 2):
-        award_badge(session, user_id, 2)
+        await award_badge(session, user_id, 2)
 
     if completed_requests >= 10 and not await has_badge(session, user_id, 4):
-        award_badge(session, user_id, 4)
+        await award_badge(session, user_id, 4)
 
     if completed_requests >= 100 and not await has_badge(session, user_id, 5):
         await award_badge(session, user_id, 5)
