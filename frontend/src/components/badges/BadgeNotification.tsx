@@ -8,21 +8,17 @@ interface BadgeNotificationProps {
   onClose: () => void;
 }
 
-let allNotifications: Badge[] = [];
-
 export const BadgeNotification = ({ badge, onClose }: BadgeNotificationProps) => {
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    allNotifications.push(badge);
-
     const timer = setTimeout(() => {
       setIsVisible(false);
       setTimeout(onClose, 300);
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [badge, onClose]);
 
   if (!isVisible) return null;
 
@@ -66,10 +62,4 @@ export const BadgeNotification = ({ badge, onClose }: BadgeNotificationProps) =>
       </Button>
     </Box>
   );
-};
-
-export const getAllNotifications = () => allNotifications;
-
-export const clearNotifications = () => {
-  allNotifications = [];
 };
