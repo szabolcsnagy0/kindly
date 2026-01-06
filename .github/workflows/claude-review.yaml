@@ -150,24 +150,8 @@ jobs:
           CI: true
           # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT are already in env
         run: |
-          echo "Debug: Checking claude binary..."
-          which claude || echo "claude not found"
-          claude --version || echo "claude version failed"
-
-          echo "Debug: Preparing prompt..."
-          # We only substitute specific variables to avoid accidental replacements
-          envsubst '${REVIEW_MODE} ${DIFF_BASE} ${PREVIOUS_REVIEW_CONTEXT}' < .github/claude-review-prompt.md > prompt_filled.md
-
-          echo "Debug: Prompt content (first 20 lines):"
-          head -n 20 prompt_filled.md
-
-          echo "Debug: Running Claude..."
-          # Try piping via stdin which is safer for large/complex text
-          cat prompt_filled.md | claude --print > review_report.md 2> claude_trace.txt
-
-          # Print the trace to console for immediate debugging
-          echo "=== CLAUDE TRACE LOGS ==="
-          cat claude_trace.txt
+          claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md
+          cat review_report.md
 
       - name: Extract Report Content
         run: |
