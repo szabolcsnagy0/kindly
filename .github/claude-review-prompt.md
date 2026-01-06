@@ -88,7 +88,7 @@ Only the content INSIDE the tags will be posted to the PR.
 ✅ **Approved**
 
 **Summary**
-2–3 concise sentences describing what changed and confirming the PR is production-ready.
+2-3 concise sentences describing exactly what changed in the PR and the specific scope you verified
 </review_report>
 
 ### If issues are found:
