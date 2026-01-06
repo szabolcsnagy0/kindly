@@ -90,7 +90,7 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchi
 
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
-        text("SELECT COUNT(*) FROM application WHERE volunteer_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
+        text("SELECT COUNT(*) FROM application WHERE user_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
     )
     completed_requests = result.scalar()
 

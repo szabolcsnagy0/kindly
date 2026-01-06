@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import get_async_session
 from ..dependencies import SessionDep, UserDataDep
 from ..services import badge_service
 from ..routers.common import SuccessResponse
@@ -48,6 +47,10 @@ async def award_badge_to_user(
     session: SessionDep,
     user_data: UserDataDep
 ):
+    # Authorization check: users can only award badges to themselves
+    if user_data["user_id"] != request.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You can only award badges to yourself")
+
     badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
 
     return SuccessResponse(
@@ -178,7 +181,7 @@ async def get_badge_progress(
         from sqlalchemy import func
         result = await session.execute(
             select(func.count(Application.id)).where(
-                Application.volunteer_id == user_id
+                Application.user_id == user_id
             )
         )
         completed_count = result.scalar()
@@ -202,6 +205,10 @@ async def reset_user_badges(
 ):
     from ..models.badge_achievement import BadgeAchievement
     from sqlalchemy import delete
+
+    # Authorization check: users can only reset their own badges
+    if user_data["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You can only reset your own badges")
 
     result = await session.execute(
         select(User).where(User.id == user_id)
