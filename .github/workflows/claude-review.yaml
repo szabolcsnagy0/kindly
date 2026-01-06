@@ -48,9 +48,9 @@ jobs:
         with:
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            Review started... I am analyzing your changes. 🕵️‍♂️
+            ## 🕵️‍♂️ Claude Review
 
-            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            Review started... I am analyzing your changes. [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
       - name: Get PR Details
         id: get-pr-details
@@ -123,26 +123,42 @@ jobs:
           fi
 
       - name: Validate Changes
+        id: validate
         run: |
           CHANGES=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
           if [ "$CHANGES" -eq 0 ]; then
             echo "No changes detected against ${{ env.DIFF_BASE }}"
-            # We don't exit here for Incremental, as we might want to verify things,
-            # but usually it's safe to stop.
-            exit 0
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found $CHANGES changed files."
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
-          echo "Found $CHANGES changed files."
+
+      - name: Post No Changes Comment
+        if: ${{ steps.validate.outputs.has_changes == 'false' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body: |
+            ## 🕵️‍♂️ Claude Review
+
+            No changes detected since the last review.
+          edit-mode: replace
 
       - name: Setup Node.js
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Claude Code
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run Claude Review
         id: review
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         continue-on-error: true
         timeout-minutes: 15
         env:
@@ -154,6 +170,7 @@ jobs:
           cat review_report.md
 
       - name: Extract Report Content
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: |
           # Extract content between <review_report> tags
           python3 -c "import sys; content = sys.stdin.read(); start = content.find('<review_report>'); end = content.find('</review_report>'); print(content[start+15:end].strip() if start != -1 and end != -1 else 'Error: No valid report tags found. \n ${content}')" < review_report.md > clean_report.md
