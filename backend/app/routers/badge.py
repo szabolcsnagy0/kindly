@@ -12,11 +12,6 @@ from sqlalchemy import select
 router = APIRouter(prefix="/badges", tags=["badges"])
 
 
-class AwardBadgeRequest(BaseModel):
-    user_id: int
-    badge_id: int
-
-
 class BadgeResponse(BaseModel):
     id: int
     badge_id: int
@@ -39,31 +34,6 @@ class LeaderboardEntry(BaseModel):
     name: str
     badge_count: int
     legendary_count: int
-
-
-@router.post("/award", response_model=SuccessResponse[BadgeResponse])
-async def award_badge_to_user(
-    request: AwardBadgeRequest,
-    session: SessionDep,
-    user_data: UserDataDep
-):
-    # Authorization check: users can only award badges to themselves
-    if user_data["id"] != request.user_id:
-        raise HTTPException(status_code=403, detail="Forbidden: You can only award badges to yourself")
-
-    badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
-
-    return SuccessResponse(
-        data=BadgeResponse(
-            id=badge.id,
-            badge_id=badge.badge_id,
-            badge_name=badge.badge_name,
-            rarity=badge.rarity,
-            description=badge.description,
-            progress=badge.progress,
-            is_completed=badge.is_completed
-        )
-    )
 
 
 @router.get("/user/{user_id}", response_model=SuccessResponse[List[BadgeResponse]])

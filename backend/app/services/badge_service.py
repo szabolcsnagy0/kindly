@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
+from ..interfaces.exceptions import BadgeNotFoundError
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
@@ -19,6 +20,9 @@ BADGE_DEFINITIONS = {
 
 async def award_badge(session: AsyncSession, user_id: int, badge_id: int) -> BadgeAchievement:
     print(f"Awarding badge {badge_id} to user {user_id}")
+
+    if badge_id not in BADGE_DEFINITIONS:
+        raise BadgeNotFoundError(f"Badge with id {badge_id} does not exist")
 
     user = await session.execute(select(User).where(User.id == user_id))
     user = user.scalar_one()
