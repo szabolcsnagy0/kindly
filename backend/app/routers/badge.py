@@ -48,7 +48,7 @@ async def award_badge_to_user(
     user_data: UserDataDep
 ):
     # Authorization check: users can only award badges to themselves
-    if user_data["user_id"] != request.user_id:
+    if user_data["id"] != request.user_id:
         raise HTTPException(status_code=403, detail="Forbidden: You can only award badges to yourself")
 
     badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
@@ -95,7 +95,7 @@ async def get_my_badges(
     user_data: UserDataDep,
     session: SessionDep
 ):
-    user_id = user_data["user_id"]
+    user_id = user_data["id"]
     badges = await badge_service.get_user_badges(session, user_id)
 
     return SuccessResponse(
@@ -156,7 +156,7 @@ async def check_user_achievements(
     session: SessionDep,
     user_data: UserDataDep
 ):
-    user_id = user_data["user_id"]
+    user_id = user_data["id"]
     await badge_service.check_and_award_badges(session, user_id)
 
     return SuccessResponse(data={"message": "Achievements checked"})
@@ -168,7 +168,7 @@ async def get_badge_progress(
     user_data: UserDataDep,
     session: SessionDep
 ):
-    user_id = user_data["user_id"]
+    user_id = user_data["id"]
 
     result = await session.execute(
         select(User).where(User.id == user_id)
@@ -207,7 +207,7 @@ async def reset_user_badges(
     from sqlalchemy import delete
 
     # Authorization check: users can only reset their own badges
-    if user_data["user_id"] != user_id:
+    if user_data["id"] != user_id:
         raise HTTPException(status_code=403, detail="Forbidden: You can only reset your own badges")
 
     result = await session.execute(
