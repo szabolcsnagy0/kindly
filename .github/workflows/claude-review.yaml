@@ -165,8 +165,18 @@ jobs:
           # Try piping via stdin which is safer for large/complex text
           cat prompt_filled.md | claude --print > review_report.md 2> claude_trace.txt
 
+          # Print the trace to console for immediate debugging
           echo "=== CLAUDE TRACE LOGS ==="
           cat claude_trace.txt
+
+      - name: Extract Report Content
+        run: |
+          # Extract content between <review_report> tags
+          python3 -c "import sys; content = sys.stdin.read(); start = content.find('<review_report>'); end = content.find('</review_report>'); print(content[start+15:end].strip() if start != -1 and end != -1 else 'Error: No valid report tags found. \n ${content}')" < review_report.md > clean_report.md
+
+          # Move it back
+          mv clean_report.md review_report.md
+
       - name: Append State to Report
         if: ${{ steps.review.outcome == 'success' }}
         run: |

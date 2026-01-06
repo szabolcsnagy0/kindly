@@ -76,37 +76,39 @@ APPROVE if:
 
 ## Output Format (STRICT – FOLLOW EXACTLY)
 
-Your response MUST be the formatted output only.
-Do NOT include explanations, preambles, or extra text.
+Your response MUST be wrapped in `<review_report>` tags.
+You may include reasoning or analysis BEFORE the opening tag, but it will be discarded.
+Only the content INSIDE the tags will be posted to the PR.
 
 ### If approval criteria are met (EXPECTED outcome):
 
-Start immediately with:
-
+<review_report>
 ## 🕵️‍♂️ Claude Review
 
 ✅ **Approved**
 
 **Summary**
 2–3 concise sentences describing what changed and confirming the PR is production-ready.
+</review_report>
 
 ### If issues are found:
 
-Start immediately with:
-
+<review_report>
 ## 🕵️‍♂️ Claude Review
-
-Then immediately a markdown table (no text between) with the following columns:
 
 | # | Severity | Category | Location | Issue | Fix |
 |---|----------|----------|----------|-------|-----|
-| 1 | 🔴 HIGH / 🟡 MED / 🟢 LOW | Security / Correctness / etc | path/to/file.ext:lineNumber | Brief description | Actionable fix suggestion |
+| 1 | 🔴 HIGH | Security | path/to/file.ext:line | Brief description | Actionable fix |
+</review_report>
 
 ### Output Rules (MANDATORY)
 
-- Start immediately with ## 🕵️‍♂️ Claude Review
-- If issues found: table starts on the next line after the header (no text between)
-- If approved: ✅ **Approved** text followed by summary
-- No text before or after the formatted output
-- Use markdown table format
-- One issue per table row
+- **WRAP ALL OUTPUT IN `<review_report>` and `</review_report>` TAGS.**
+- Inside the tags:
+  - Start immediately with ## 🕵️‍♂️ Claude Review
+  - If issues found: table starts on the next line after the header
+  - If approved: ✅ **Approved** text followed by summary
+  - No text before or after the formatted output
+  - Use markdown table format
+  - One issue per table row
+- Outside the tags: You can write your analysis, verification steps, and reasoning.
