@@ -33,10 +33,10 @@ export const MyBadgesPage = () => {
     let total = 0;
     for (let i = 0; i < completedBadges.length; i++) {
       const badge = completedBadges[i];
-      if (badge.rarity == 1) total += 1;
-      else if (badge.rarity == 2) total += 5;
-      else if (badge.rarity == 3) total += 15;
-      else if (badge.rarity == 4) total += 50;
+      if (badge.rarity === 1) total += 1;
+      else if (badge.rarity === 2) total += 5;
+      else if (badge.rarity === 3) total += 15;
+      else if (badge.rarity === 4) total += 50;
     }
     return total;
   };

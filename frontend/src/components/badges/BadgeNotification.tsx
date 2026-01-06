@@ -22,7 +22,7 @@ export const BadgeNotification = ({ badge, onClose }: BadgeNotificationProps) =>
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [badge, onClose]);
 
   if (!isVisible) return null;
 

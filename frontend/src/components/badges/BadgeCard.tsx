@@ -21,7 +21,7 @@ export const BadgeCard = ({ badge, onClick }: BadgeCardProps) => {
   let progressBar;
   if (badge.progress < 100) {
     progressBar = (
-      <Box bg="gray.200" h="4px" w="full" borderRadius="full">
+      <Box bg="gray.200" h="4px" w="full" borderRadius="full" data-testid="progress-bar">
         <Box
           bg={rarityColor}
           h="full"
