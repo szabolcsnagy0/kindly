@@ -41,9 +41,13 @@ async def test_award_badge_duplicate():
         rarity=2, is_completed=True, progress=100, total_required=100
     )
 
-    session.execute = AsyncMock()
-    session.execute.return_value.scalar_one.return_value = user
-    session.execute.return_value.scalar_one_or_none.return_value = existing_badge
+    user_result = AsyncMock()
+    user_result.scalar_one.return_value = user
+
+    badge_result = AsyncMock()
+    badge_result.scalar_one_or_none.return_value = existing_badge
+
+    session.execute = AsyncMock(side_effect=[user_result, badge_result])
 
     badge = await award_badge(session, 1, 2)
 
