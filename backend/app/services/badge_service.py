@@ -87,7 +87,7 @@ async def get_user_badges(session: AsyncSession, user_id: int) -> List[BadgeAchi
 
 async def check_and_award_badges(session: AsyncSession, user_id: int):
     result = await session.execute(
-        text("SELECT COUNT(*) FROM application WHERE volunteer_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
+        text("SELECT COUNT(*) FROM application WHERE user_id = :user_id AND status = 'ACCEPTED'").bindparams(user_id=user_id)
     )
     completed_requests = result.scalar()
 
@@ -123,7 +123,14 @@ async def admin_award_special_badge(
     if api_key != ADMIN_API_KEY:
         return None
 
-    badge_id = len(BADGE_DEFINITIONS) + 1
+    # Query for the maximum badge_id to avoid collisions
+    result = await session.execute(
+        select(BadgeAchievement.badge_id).order_by(BadgeAchievement.badge_id.desc()).limit(1)
+    )
+    max_badge_id = result.scalar()
+
+    # Use the greater of max_badge_id or predefined badge count
+    badge_id = max(max_badge_id + 1 if max_badge_id else 0, len(BADGE_DEFINITIONS) + 1)
 
     badge = BadgeAchievement(
         user_id=user_id,
@@ -151,9 +158,9 @@ async def get_badge_leaderboard(session: AsyncSession) -> List[dict]:
             COUNT(ba.id) as badge_count,
             SUM(CASE WHEN ba.rarity = 4 THEN 1 ELSE 0 END) as legendary_count
         FROM "user" u
-        LEFT JOIN badge_achievement ba ON u.id = ba.user_id
-        WHERE ba.is_completed = true
+        LEFT JOIN badge_achievement ba ON u.id = ba.user_id AND ba.is_completed = true
         GROUP BY u.id, u.first_name, u.last_name
+        HAVING COUNT(ba.id) > 0
         ORDER BY legendary_count DESC, badge_count DESC
         LIMIT 100
     """
@@ -187,9 +194,13 @@ async def bulk_award_badges(session: AsyncSession, user_ids: List[int], badge_id
     results = []
     for user_id in user_ids:
         try:
-            badge = await award_badge(session, user_id, badge_id)
-            results.append({"user_id": user_id, "success": True, "badge": badge})
+            # Use a savepoint for each award to allow partial success
+            async with session.begin_nested():
+                badge = await award_badge(session, user_id, badge_id)
+                results.append({"user_id": user_id, "success": True, "badge": badge})
         except Exception as e:
+            # Rollback only this specific award, continue with others
+            await session.rollback()
             results.append({"user_id": user_id, "success": False, "error": str(e)})
 
     return results

@@ -12,12 +12,17 @@ export const BadgeNotification = ({ badge, onClose }: BadgeNotificationProps) =>
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    let closeTimer: ReturnType<typeof setTimeout>;
+
+    const visibilityTimer = setTimeout(() => {
       setIsVisible(false);
-      setTimeout(onClose, 300);
+      closeTimer = setTimeout(onClose, 300);
     }, 5000);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(visibilityTimer);
+      if (closeTimer) clearTimeout(closeTimer);
+    };
   }, [badge, onClose]);
 
   if (!isVisible) return null;

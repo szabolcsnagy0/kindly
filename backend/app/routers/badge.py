@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import get_async_session
 from ..dependencies import SessionDep, UserDataDep
 from ..services import badge_service
 from ..routers.common import SuccessResponse
@@ -46,8 +45,13 @@ class LeaderboardEntry(BaseModel):
 async def award_badge_to_user(
     request: AwardBadgeRequest,
     session: SessionDep,
-    user_data: UserDataDep
+    user_data: UserDataDep,
+    x_api_key: str = Header(None)
 ):
+    # Authorization check: Only allow admins or system with valid API key to award badges
+    if x_api_key != badge_service.ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
     badge = await badge_service.award_badge(session, request.user_id, request.badge_id)
 
     return SuccessResponse(
@@ -178,7 +182,7 @@ async def get_badge_progress(
         from sqlalchemy import func
         result = await session.execute(
             select(func.count(Application.id)).where(
-                Application.volunteer_id == user_id
+                Application.user_id == user_id
             )
         )
         completed_count = result.scalar()
@@ -202,6 +206,10 @@ async def reset_user_badges(
 ):
     from ..models.badge_achievement import BadgeAchievement
     from sqlalchemy import delete
+
+    # Authorization check: Only allow users to reset their own badges
+    if user_data["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only reset your own badges")
 
     result = await session.execute(
         select(User).where(User.id == user_id)

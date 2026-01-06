@@ -1,4 +1,5 @@
 import pytest
+from datetime import date
 from unittest.mock import Mock, AsyncMock, MagicMock
 from app.services.badge_service import (
     award_badge,
@@ -15,7 +16,7 @@ from app.models.user import User
 async def test_award_badge():
     session = AsyncMock()
     user = User(id=1, first_name="John", last_name="Doe", email="test@test.com",
-                password="hash", date_of_birth="2000-01-01", about_me="test",
+                password="hash", date_of_birth=date(2000, 1, 1), about_me="test",
                 is_volunteer=True)
 
     session.execute = AsyncMock()
@@ -33,7 +34,7 @@ async def test_award_badge():
 async def test_award_badge_duplicate():
     session = AsyncMock()
     user = User(id=1, first_name="John", last_name="Doe", email="test@test.com",
-                password="hash", date_of_birth="2000-01-01", about_me="test",
+                password="hash", date_of_birth=date(2000, 1, 1), about_me="test",
                 is_volunteer=True)
 
     existing_badge = BadgeAchievement(
@@ -83,7 +84,7 @@ async def test_get_user_badges():
     )
 
     user = User(id=1, first_name="John", last_name="Doe", email="test@test.com",
-                password="hash", date_of_birth="2000-01-01", about_me="test",
+                password="hash", date_of_birth=date(2000, 1, 1), about_me="test",
                 is_volunteer=True)
 
     session.execute = AsyncMock()
@@ -113,6 +114,10 @@ async def test_check_and_award_badges():
 
     await check_and_award_badges(session, 1)
 
+    # Verify that the function was called and queries were executed
+    assert session.execute.called
+    assert session.execute.call_count > 0
+
 
 def test_badge_definitions_exist():
     assert BADGE_DEFINITIONS is not None
@@ -129,7 +134,7 @@ def test_badge_definitions_structure():
 async def test_award_badge_invalid_id():
     session = AsyncMock()
     user = User(id=1, first_name="John", last_name="Doe", email="test@test.com",
-                password="hash", date_of_birth="2000-01-01", about_me="test",
+                password="hash", date_of_birth=date(2000, 1, 1), about_me="test",
                 is_volunteer=True)
 
     session.execute = AsyncMock()
