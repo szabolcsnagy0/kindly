@@ -9,33 +9,24 @@ describe("badgeService", () => {
     vi.clearAllMocks();
   });
 
-  it("awards badge", async () => {
-    const mockResponse = {
-      data: {
-        success: true,
-        data: {
-          id: 1,
-          badge_id: 2,
-          badge_name: "Test",
-          rarity: 1,
-          progress: 100,
-          is_completed: true,
-        },
-      },
-    };
-
-    vi.mocked(api.post).mockResolvedValue(mockResponse);
-
-    const result = await badgeService.awardBadge({ user_id: 1, badge_id: 2 });
-
-    expect(result).toBeDefined();
-    expect(result.badge_id).toBe(2);
-  });
-
   it("gets user badges", async () => {
     const mockBadges = [
-      { id: 1, badge_id: 1, badge_name: "Badge1", rarity: 1, progress: 100, is_completed: true },
-      { id: 2, badge_id: 2, badge_name: "Badge2", rarity: 2, progress: 100, is_completed: true },
+      {
+        id: 1,
+        badge_id: 1,
+        badge_name: "Badge1",
+        rarity: 1,
+        progress: 100,
+        is_completed: true,
+      },
+      {
+        id: 2,
+        badge_id: 2,
+        badge_name: "Badge2",
+        rarity: 2,
+        progress: 100,
+        is_completed: true,
+      },
     ];
 
     vi.mocked(api.get).mockResolvedValue({
@@ -84,7 +75,10 @@ describe("badgeService", () => {
 
   it("handles badge progress", async () => {
     vi.mocked(api.get).mockResolvedValue({
-      data: { success: true, data: { badge_id: 1, progress: 50, completed: false } },
+      data: {
+        success: true,
+        data: { badge_id: 1, progress: 50, completed: false },
+      },
     });
 
     const result = await badgeService.getBadgeProgress(1);
@@ -94,7 +88,14 @@ describe("badgeService", () => {
 
   it("caches user badges", async () => {
     const mockBadges = [
-      { id: 1, badge_id: 1, badge_name: "Badge1", rarity: 1, progress: 100, is_completed: true },
+      {
+        id: 1,
+        badge_id: 1,
+        badge_name: "Badge1",
+        rarity: 1,
+        progress: 100,
+        is_completed: true,
+      },
     ];
 
     vi.mocked(api.get).mockResolvedValue({

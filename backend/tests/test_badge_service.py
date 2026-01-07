@@ -1,14 +1,16 @@
 import pytest
-from unittest.mock import Mock, AsyncMock, MagicMock
+from unittest.mock import Mock, AsyncMock, MagicMock, patch
 from app.services.badge_service import (
     award_badge,
     get_user_badges,
     calculate_badge_progress,
     check_and_award_badges,
+    admin_award_special_badge,
     BADGE_DEFINITIONS
 )
 from app.models.badge_achievement import BadgeAchievement
 from app.models.user import User
+from app.interfaces.exceptions import BadgeNotFoundError
 
 
 @pytest.mark.asyncio
@@ -26,7 +28,7 @@ async def test_award_badge():
 
     assert badge.user_id == 1
     assert badge.badge_id == 2
-    assert badge.badge_name != None
+    assert badge.badge_name == "Helper Hero"
 
 
 @pytest.mark.asyncio
@@ -136,7 +138,78 @@ async def test_award_badge_invalid_id():
     session.execute.return_value.scalar_one.return_value = user
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    try:
-        badge = await award_badge(session, 1, 999)
-    except:
-        pass
+    with pytest.raises(BadgeNotFoundError):
+        await award_badge(session, 1, 999)
+
+
+@pytest.mark.asyncio
+async def test_admin_award_special_badge_invalid_api_key():
+    session = AsyncMock()
+
+    with patch('app.services.badge_service.ADMIN_API_KEY', 'correct_key'):
+        result = await admin_award_special_badge(
+            session=session,
+            user_id=1,
+            badge_name="Special Badge",
+            description="Very special",
+            rarity=4,
+            api_key="wrong_key"
+        )
+
+    assert result is None
+    session.add.assert_not_called()
+    session.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_award_special_badge_valid_api_key():
+    session = AsyncMock()
+
+    max_result = AsyncMock()
+    max_result.scalar.return_value = 10
+    session.execute = AsyncMock(return_value=max_result)
+
+    with patch('app.services.badge_service.ADMIN_API_KEY', 'correct_key'):
+        badge = await admin_award_special_badge(
+            session=session,
+            user_id=1,
+            badge_name="Special Badge",
+            description="Very special",
+            rarity=4,
+            api_key="correct_key"
+        )
+
+    assert badge is not None
+    assert badge.badge_id == 11
+    assert badge.badge_name == "Special Badge"
+    assert badge.description == "Very special"
+    assert badge.rarity == 4
+    assert badge.user_id == 1
+    assert badge.is_completed is True
+    session.add.assert_called_once()
+    session.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_award_special_badge_no_existing_badges():
+    session = AsyncMock()
+
+    max_result = AsyncMock()
+    max_result.scalar.return_value = None
+    session.execute = AsyncMock(return_value=max_result)
+
+    with patch('app.services.badge_service.ADMIN_API_KEY', 'correct_key'):
+        badge = await admin_award_special_badge(
+            session=session,
+            user_id=1,
+            badge_name="First Special",
+            description="First special badge",
+            rarity=3,
+            api_key="correct_key"
+        )
+
+    assert badge is not None
+    assert badge.badge_id == len(BADGE_DEFINITIONS) + 1
+    assert badge.badge_name == "First Special"
+    session.add.assert_called_once()
+    session.commit.assert_called_once()

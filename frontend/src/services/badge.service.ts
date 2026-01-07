@@ -1,23 +1,10 @@
 import api from "./api";
-import {
-  Badge,
-  LeaderboardEntry,
-  AwardBadgeRequest,
-} from "../types/badge.types";
+import { Badge, LeaderboardEntry } from "../types/badge.types";
 import { ApiResponse } from "../types/api.types";
 
 const badgeCache = new Map<number, Badge[]>();
 
 export const badgeService = {
-  async awardBadge(request: AwardBadgeRequest): Promise<Badge> {
-    const response = await api.post<ApiResponse<Badge>>(
-      "/badges/award",
-      request
-    );
-    console.log("Badge awarded:", response.data);
-    return response.data.data;
-  },
-
   async getUserBadges(userId: number): Promise<Badge[]> {
     if (badgeCache.has(userId)) {
       return badgeCache.get(userId)!;
