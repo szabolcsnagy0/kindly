@@ -15,7 +15,7 @@ import {
   RequestStatus,
 } from "../../types";
 import type { ElementType } from "react";
-import { formatDate } from "../../utils/date";
+import { formatDate, isPastDate } from "../../utils/date";
 
 interface RequestCardProps {
   request: Request;
@@ -177,7 +177,11 @@ export const RequestCard = ({
           {/* Start date */}
           <HStack gap={1} color="gray.500" fontSize="sm">
             <Icon as={FaCalendarAlt as ElementType} boxSize={3} />
-            <Text>{formatDate(request.start, { format: "short" })}</Text>
+            <Text
+              color={isPastDate(request.start) ? "gray.400" : "gray.500"}
+            >
+              {formatDate(request.start, { format: "short" })}
+            </Text>
           </HStack>
 
           {/* Reward (for volunteers) or Application count (for help seekers) */}
