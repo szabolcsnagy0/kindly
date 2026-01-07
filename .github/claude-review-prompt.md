@@ -97,8 +97,6 @@ Only the content INSIDE the tags will be posted to the PR.
 ### If approval criteria are met (EXPECTED outcome):
 
 <review_report>
-## 🕵️‍♂️ Claude Review
-
 ✅ **Approved**
 
 **Summary**
@@ -108,8 +106,6 @@ Only the content INSIDE the tags will be posted to the PR.
 ### If issues are found:
 
 <review_report>
-## 🕵️‍♂️ Claude Review
-
 | # | Severity | Category | Location | Issue | Fix |
 |---|----------|----------|----------|-------|-----|
 | 1 | 🔴 HIGH | Security | path/to/file.ext:line | Brief description | Actionable fix |
@@ -119,10 +115,9 @@ Only the content INSIDE the tags will be posted to the PR.
 
 - **WRAP ALL OUTPUT IN `<review_report>` and `</review_report>` TAGS.**
 - Inside the tags:
-  - Start immediately with ## 🕵️‍♂️ Claude Review
-  - If issues found: table starts on the next line after the header
-  - If approved: ✅ **Approved** text followed by summary
-  - No text before or after the formatted output
+  - If approved: Start immediately with ✅ **Approved** followed by summary
+  - If issues found: Start immediately with the markdown table
+  - No header, no text before or after the formatted output
   - Use markdown table format
   - One issue per table row
 - Outside the tags: You can write your analysis, verification steps, and reasoning.

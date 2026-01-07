@@ -178,11 +178,16 @@ jobs:
           # Move it back
           mv clean_report.md review_report.md
 
-      - name: Append State to Report
+      - name: Finalize Report
         if: ${{ steps.review.outcome == 'success' }}
         run: |
-          echo "" >> review_report.md
-          echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> review_report.md
+          # Prepend header and append state marker
+          echo "## 🕵️‍♂️ Claude Review" > final_report.md
+          echo "" >> final_report.md
+          cat review_report.md >> final_report.md
+          echo "" >> final_report.md
+          echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> final_report.md
+          mv final_report.md review_report.md
 
       - name: Post Success Comment
         if: ${{ steps.review.outcome == 'success' }}
