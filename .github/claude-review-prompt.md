@@ -106,9 +106,9 @@ Only the content INSIDE the tags will be posted to the PR.
 ### If issues are found:
 
 <review_report>
-| # | Severity | Category | Location | Issue | Fix |
+| # | Severity | Category | Issue | Suggested Fix | Location |
 |---|----------|----------|----------|-------|-----|
-| 1 | 🔴 HIGH | Security | path/to/file.ext:line | Brief description | Actionable fix |
+| 1 | 🔴 HIGH | Security | Brief description | Actionable fix | path/to/file.ext:line |
 </review_report>
 
 ### Output Rules (MANDATORY)
