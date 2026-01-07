@@ -1,8 +1,9 @@
 import os
+import secrets
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from ..models.badge_achievement import BadgeAchievement
 from ..models.user import User
 from ..interfaces.exceptions import BadgeNotFoundError
@@ -127,10 +128,12 @@ async def admin_award_special_badge(
     rarity: int,
     api_key: str
 ) -> Optional[BadgeAchievement]:
-    if api_key != ADMIN_API_KEY:
+    if not secrets.compare_digest(api_key or "", ADMIN_API_KEY or ""):
         return None
 
-    badge_id = len(BADGE_DEFINITIONS) + 1
+    result = await session.execute(select(func.max(BadgeAchievement.badge_id)))
+    max_id = result.scalar() or len(BADGE_DEFINITIONS)
+    badge_id = max_id + 1
 
     badge = BadgeAchievement(
         user_id=user_id,

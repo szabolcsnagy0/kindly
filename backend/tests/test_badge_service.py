@@ -9,6 +9,7 @@ from app.services.badge_service import (
 )
 from app.models.badge_achievement import BadgeAchievement
 from app.models.user import User
+from app.interfaces.exceptions import BadgeNotFoundError
 
 
 @pytest.mark.asyncio
@@ -26,7 +27,7 @@ async def test_award_badge():
 
     assert badge.user_id == 1
     assert badge.badge_id == 2
-    assert badge.badge_name != None
+    assert badge.badge_name == "Helper Hero"
 
 
 @pytest.mark.asyncio
@@ -136,7 +137,5 @@ async def test_award_badge_invalid_id():
     session.execute.return_value.scalar_one.return_value = user
     session.execute.return_value.scalar_one_or_none.return_value = None
 
-    try:
-        badge = await award_badge(session, 1, 999)
-    except:
-        pass
+    with pytest.raises(BadgeNotFoundError):
+        await award_badge(session, 1, 999)

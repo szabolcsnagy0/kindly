@@ -51,7 +51,8 @@ describe("BadgeCard", () => {
 
   it("has correct rarity color", () => {
     render(<BadgeCard badge={mockBadge} />);
-    expect(true).toBe(true);
+    const element = screen.getByText("Test Badge").closest("div");
+    expect(element).toHaveStyle({ borderColor: "#4169E1" });
   });
 
   it("renders without crashing", () => {
