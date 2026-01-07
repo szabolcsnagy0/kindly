@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "../../test/test-utils";
 import { RequestCard } from "./RequestCard";
 import { RequestStatus, ApplicationStatus } from "../../types";
 import type { Request, VolunteerRequest } from "../../types";
@@ -58,9 +58,7 @@ describe("RequestCard", () => {
 
       vi.mocked(isPastDate).mockReturnValue(true);
 
-      const { container } = render(
-        <RequestCard request={pastRequest} isVolunteer={true} />
-      );
+      render(<RequestCard request={pastRequest} isVolunteer={true} />);
 
       // Find the date text element
       const dateText = screen.getByText(/Jan 1, 2025/i);
@@ -80,9 +78,7 @@ describe("RequestCard", () => {
 
       vi.mocked(isPastDate).mockReturnValue(false);
 
-      const { container } = render(
-        <RequestCard request={futureRequest} isVolunteer={true} />
-      );
+      render(<RequestCard request={futureRequest} isVolunteer={true} />);
 
       // Find the date text element
       const dateText = screen.getByText(/Dec 31, 2025/i);
