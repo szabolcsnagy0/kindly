@@ -20,8 +20,8 @@ permissions:
 
 jobs:
   claude-review:
-    # Trigger only on PR comments starting with '/claude-review'
-    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, '/claude-review') }}
+    # Trigger only on PR comments starting with 'claude-review'
+    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, 'claude-review') }}
     runs-on: ubuntu-latest
 
     steps:

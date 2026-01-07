@@ -37,13 +37,21 @@ You MUST do the following before reporting any issue:
    - Contract Verification: Verify that all referenced variables, functions, types, and class members actually exist in their definitions.
    - Unmasking Strategy: If you find a "Blocking" issue (e.g., Syntax Error, Security Flaw), do not stop analyzing. Mentally "fix" it and check if the underlying logic is valid.
 
-5. **Verify Fixes (If Context Provided):**
+5. **Test File Verification (MANDATORY):**
+   - For every changed or new source file, identify and read ALL corresponding test files
+   - Verify tests actually cover the changed functionality
+   - Check that test assertions are meaningful and specific (not just truthy checks)
+   - Ensure edge cases and error paths are tested
+   - Verify tests are isolated with proper setup/teardown
+   - If tests are missing, inadequate, or incorrect, this is a BLOCKING issue
+
+6. **Verify Fixes (If Context Provided):**
    - Check if the issues raised in the `Previous Review Context` have been resolved.
    - If they are fixed, do NOT report them again.
    - If they are partially fixed, report the specific gap.
 
-6. Use --no-pager for ALL git commands.
-7. Do NOT open interactive shells.
+7. Use --no-pager for ALL git commands.
+8. Do NOT open interactive shells.
 
 ## Final-State Verification Rule (MANDATORY)
 
@@ -59,7 +67,13 @@ Evaluate ALL changes across these dimensions.
 3. **Performance & Scaling**: N+1 queries, memory leaks, inefficient algorithms, scaling bottlenecks
 4. **Architecture**: Consistency with existing patterns, separation of concerns, maintainability
 5. **Extensibility**: Trap-door decisions, hard-coded values, tight coupling that limits future changes
-6. **Testing**: Missing test coverage for critical paths, weak assertions, untested edge cases, test quality
+6. **Testing**:
+   - **Coverage**: Are all new functions, branches, and error paths tested?
+   - **Quality**: Do assertions verify specific behavior (not just truthy checks)? Are tests isolated?
+   - **Correctness**: Do tests actually fail when code breaks? Are async tests properly awaited?
+   - **Completeness**: Are edge cases, null/undefined, boundaries, and negative cases tested?
+   - **Maintainability**: Clear test names? No over-mocking? Proper setup/teardown?
+   - **Red Flags**: Tests that always pass, testing implementation details instead of behavior, flaky tests
 7. **Code Quality**: Readability, duplication, unnecessary complexity, inconsistent style
 8. **Edge Cases**: Error handling, boundary conditions, race conditions, null/undefined handling
 
