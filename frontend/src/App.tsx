@@ -8,6 +8,8 @@ import { RequestEditPage } from "./pages/RequestEditPage";
 import { CreateRequestPage } from "./pages/CreateRequestPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { EditProfilePage } from "./pages/EditProfilePage";
+import { MyBadgesPage } from "./pages/MyBadgesPage";
+import { BadgeLeaderboardPage } from "./pages/BadgeLeaderboardPage";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { initializeTokenRefresh } from "./services/api";
 
@@ -37,6 +39,10 @@ function App() {
         {/* Profile routes */}
         <Route path="/profile/:id" element={<ProfilePage />} />
         <Route path="/profile/:id/edit" element={<EditProfilePage />} />
+
+        {/* Badge routes */}
+        <Route path="/badges" element={<MyBadgesPage />} />
+        <Route path="/leaderboard" element={<BadgeLeaderboardPage />} />
       </Route>
 
       {/* Fallback for unknown routes */}
