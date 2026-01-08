@@ -15,9 +15,8 @@ ${PREVIOUS_REVIEW_CONTEXT}
 ## Pre-Loaded Context
 
 All changed files and diffs have been prepared for you:
-- `unified_diff.txt`: Complete unified diff showing all changes across all files
-- `changed_files/`: All changed files in their complete final state
-- `changed_files_list.txt`: List of all changed files
+- `unified_diff.txt`: Complete unified diff showing all changes (use this to see what changed)
+- `changed_files/`: All changed files in their complete final state (use this for full context)
 
 **This means you do NOT need to:**
 - Run `git diff` or `git log` commands

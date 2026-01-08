@@ -159,31 +159,21 @@ jobs:
             fi
           done
 
-          cat > changed_files_list.txt << 'EOF'
-          # Changed Files
-
-          The following files have been modified in this PR.
-          All files are available in the `changed_files/` directory with their complete final state.
-
-          EOF
-
-          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD >> changed_files_list.txt
-
           # Generate unified diff showing all changes
           git --no-pager diff ${{ env.DIFF_BASE }}...HEAD > unified_diff.txt
 
-          echo "Prepared $(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l) changed files with diff"
+          FILE_COUNT=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
+          echo "Prepared $FILE_COUNT changed files"
 
-          # DEBUG: Show prepared files
+          # DEBUG: Show prepared context
           echo ""
-          echo "DEBUG: Changed files list:"
-          cat changed_files_list.txt
+          echo "DEBUG: Changed files ($FILE_COUNT):"
+          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD
           echo ""
-          echo "DEBUG: Unified diff:"
-          head unified_diff.txt
+          echo "DEBUG: Unified diff (first 100 lines):"
+          head -100 unified_diff.txt
           echo ""
-          echo "DEBUG: Files in changed_files/ directory:"
-          find changed_files -type f
+          echo "DEBUG: Total diff lines: $(wc -l < unified_diff.txt)"
 
       - name: Setup Node.js
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
