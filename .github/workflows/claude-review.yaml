@@ -17,6 +17,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 
 jobs:
   claude-review:
@@ -29,7 +30,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.reactions.createForIssueComment({
+            await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: context.payload.comment.id,
@@ -42,6 +43,31 @@ jobs:
           ref: refs/pull/${{ env.GITHUB_PR_NUMBER }}/head
           fetch-depth: 0
 
+      - name: Create Claude Check Run
+        id: create-check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const check = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: "Claude Review",
+              head_sha: pr.data.head.sha,
+              status: "in_progress",
+              output: {
+                title: "Claude Review",
+                summary: "Review in progress…"
+              }
+            });
+
+            core.setOutput("check_run_id", check.data.id);
+
       - name: Post Start Comment
         id: initial-comment
         uses: peter-evans/create-or-update-comment@v4
@@ -50,7 +76,8 @@ jobs:
           body: |
             ## 🕵️‍♂️ Claude Review
 
-            Review started... I am analyzing your changes. [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            Review started…
+            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
       - name: Get PR Details
         id: get-pr-details
@@ -64,177 +91,104 @@ jobs:
             });
             core.setOutput('base_branch', pr.data.base.ref);
             core.setOutput('head_sha', pr.data.head.sha);
-            return pr.data.base.ref;
 
       - name: Fetch Base Branch
         run: git fetch origin ${{ steps.get-pr-details.outputs.base_branch }}
 
-      - name: Get Previous Review State
-        id: get-state
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            // Find last comment by bot that contains a review SHA
-            // We look for the hidden comment format <!-- review-sha: SHA -->
-            const botComments = comments.data
-              .filter(c => c.user.type === 'Bot' && c.body.includes('<!-- review-sha:'))
-              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
-            const lastComment = botComments.length > 0 ? botComments[botComments.length - 1] : null;
-
-            if (lastComment) {
-              const match = lastComment.body.match(/<!-- review-sha: (\w+) -->/);
-              if (match) {
-                console.log(`Found previous review SHA: ${match[1]}`);
-                core.setOutput('previous_sha', match[1]);
-
-                // Export the body as context for the prompt
-                // Using multiline delimiter for safety
-                core.exportVariable('PREVIOUS_REVIEW_CONTEXT', lastComment.body);
-                return;
-              }
-            }
-
-            console.log('No previous valid review found.');
-            core.setOutput('previous_sha', '');
-            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous review found.');
-
-      - name: Determine Review Mode & Diff Base
-        id: determine-mode
-        run: |
-          PREV_SHA="${{ steps.get-state.outputs.previous_sha }}"
-          BASE_REF="origin/${{ steps.get-pr-details.outputs.base_branch }}"
-
-          # Check if PREV_SHA is valid and exists in the current history (wasn't force-pushed away)
-          if [ -n "$PREV_SHA" ] && git cat-file -t "$PREV_SHA" > /dev/null 2>&1; then
-            echo "Review Mode: INCREMENTAL"
-            echo "REVIEW_MODE=INCREMENTAL" >> $GITHUB_ENV
-            echo "DIFF_BASE=$PREV_SHA" >> $GITHUB_ENV
-          else
-            echo "Review Mode: FULL"
-            echo "REVIEW_MODE=FULL" >> $GITHUB_ENV
-            echo "DIFF_BASE=$BASE_REF" >> $GITHUB_ENV
-          fi
-
-      - name: Validate Changes
-        id: validate
-        run: |
-          CHANGES=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
-          if [ "$CHANGES" -eq 0 ]; then
-            echo "No changes detected against ${{ env.DIFF_BASE }}"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Found $CHANGES changed files."
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Post No Changes Comment
-        if: ${{ steps.validate.outputs.has_changes == 'false' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body: |
-            ## 🕵️‍♂️ Claude Review
-
-            No changes detected since the last review.
-          edit-mode: replace
-
-      - name: Prepare Changed Files
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        run: |
-          mkdir -p changed_files
-
-          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | while IFS= read -r file; do
-            if [ -f "$file" ]; then
-              target_dir="changed_files/$(dirname "$file")"
-              mkdir -p "$target_dir"
-              cp "$file" "changed_files/$file"
-            fi
-          done
-
-          # Generate unified diff showing all changes
-          git --no-pager diff ${{ env.DIFF_BASE }}...HEAD > unified_diff.txt
-
-          FILE_COUNT=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
-          echo "Prepared $FILE_COUNT changed files"
-
-          # DEBUG: Show prepared context
-          echo ""
-          echo "DEBUG: Changed files ($FILE_COUNT):"
-          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD
-          echo ""
-          echo "DEBUG: Unified diff (first 100 lines):"
-          head -100 unified_diff.txt
-          echo ""
-          echo "DEBUG: Total diff lines: $(wc -l < unified_diff.txt)"
-
-      - name: Setup Node.js
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Claude Code
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Run Claude Review
         id: review
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         continue-on-error: true
         timeout-minutes: 15
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CI: true
-          # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT are already in env
         run: |
           claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md
-          cat review_report.md
 
       - name: Extract Report Content
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: |
-          # Extract content between <review_report> tags
-          python3 -c "import sys; content = sys.stdin.read(); start = content.find('<review_report>'); end = content.find('</review_report>'); print(content[start+15:end].strip() if start != -1 and end != -1 else 'Error: No valid report tags found. \n ${content}')" < review_report.md > clean_report.md
+          python3 - <<'EOF'
+          import re, sys, json
 
-          # Move it back
-          mv clean_report.md review_report.md
+          content = open("review_report.md").read()
+          match = re.search(r"<review_report>(.*?)</review_report>", content, re.S)
+          if not match:
+              print("NO_REPORT=true", file=open(os.environ["GITHUB_ENV"], "a"))
+              sys.exit(0)
 
-      - name: Finalize Report
-        if: ${{ steps.review.outcome == 'success' }}
+          body = match.group(1).strip()
+          open("clean_report.md", "w").write(body)
+          EOF
+
+      - name: Generate Check Run Annotations
+        id: annotations
         run: |
-          # Prepend header and append state marker
-          echo "## 🕵️‍♂️ Claude Review" > final_report.md
-          echo "" >> final_report.md
-          cat review_report.md >> final_report.md
-          echo "" >> final_report.md
-          echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> final_report.md
-          mv final_report.md review_report.md
+          python3 - <<'EOF'
+          import re, json
 
-      - name: Post Success Comment
-        if: ${{ steps.review.outcome == 'success' }}
+          annotations = []
+
+          table = open("clean_report.md").read()
+          rows = [r for r in table.splitlines() if r.startswith("|")][2:]
+
+          for row in rows:
+              cols = [c.strip() for c in row.strip("|").split("|")]
+              if len(cols) < 6:
+                  continue
+
+              severity, issue, location = cols[1], cols[3], cols[5]
+
+              if ":" not in location:
+                  continue
+
+              path, line = location.split(":")
+              annotations.append({
+                  "path": path,
+                  "start_line": int(line),
+                  "end_line": int(line),
+                  "annotation_level": "failure",
+                  "message": issue
+              })
+
+          open("annotations.json", "w").write(json.dumps(annotations))
+          print(f"Generated {len(annotations)} annotations")
+          EOF
+
+      - name: Complete Check Run
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const annotations = fs.existsSync("annotations.json")
+              ? JSON.parse(fs.readFileSync("annotations.json", "utf8"))
+              : [];
+
+            const conclusion =
+              "${{ steps.review.outcome }}" === "success" && annotations.length === 0
+                ? "success"
+                : "failure";
+
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: Number("${{ steps.create-check.outputs.check_run_id }}"),
+              status: "completed",
+              conclusion,
+              output: {
+                title: "Claude Review",
+                summary:
+                  annotations.length === 0
+                    ? "No issues found."
+                    : `${annotations.length} issue(s) found.`,
+                annotations: annotations.slice(0, 50)
+              }
+            });
+
+      - name: Post Final Comment
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: review_report.md
-          edit-mode: replace
-
-      - name: Post Failure Comment
-        if: ${{ steps.review.outcome == 'failure' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body: |
-            :x: Claude review failed to complete.
-
-            [View workflow run for details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          body-path: clean_report.md
           edit-mode: replace
