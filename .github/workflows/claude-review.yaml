@@ -17,6 +17,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write  # Required for creating and updating Check Runs
 
 jobs:
   claude-review:
@@ -65,6 +66,27 @@ jobs:
             core.setOutput('base_branch', pr.data.base.ref);
             core.setOutput('head_sha', pr.data.head.sha);
             return pr.data.base.ref;
+
+      - name: Create Check Run
+        id: create-check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkRun = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Claude Review',
+              head_sha: '${{ steps.get-pr-details.outputs.head_sha }}',
+              status: 'in_progress',
+              started_at: new Date().toISOString(),
+              output: {
+                title: 'Claude Review',
+                summary: 'Review in progress... Analyzing your changes.'
+              }
+            });
+            core.setOutput('check_run_id', checkRun.data.id);
+            console.log(`Created Check Run with ID: ${checkRun.data.id}`);
+            return checkRun.data.id;
 
       - name: Fetch Base Branch
         run: git fetch origin ${{ steps.get-pr-details.outputs.base_branch }}
@@ -134,6 +156,29 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Complete Check Run for No Changes
+        if: ${{ steps.validate.outputs.has_changes == 'false' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkRunId = ${{ steps.create-check.outputs.check_run_id }};
+
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: checkRunId,
+              status: 'completed',
+              conclusion: 'success',
+              completed_at: new Date().toISOString(),
+              output: {
+                title: 'Claude Review',
+                summary: '✅ No changes to review',
+                text: 'No changes detected since the last review.'
+              }
+            });
+
+            console.log('✓ Check Run completed: no changes');
+
       - name: Post No Changes Comment
         if: ${{ steps.validate.outputs.has_changes == 'false' }}
         uses: peter-evans/create-or-update-comment@v4
@@ -198,25 +243,143 @@ jobs:
           claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md
           cat review_report.md
 
-      - name: Extract Report Content
+      - name: Extract and Process Review JSON
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: |
-          # Extract content between <review_report> tags
-          python3 -c "import sys; content = sys.stdin.read(); start = content.find('<review_report>'); end = content.find('</review_report>'); print(content[start+15:end].strip() if start != -1 and end != -1 else 'Error: No valid report tags found. \n ${content}')" < review_report.md > clean_report.md
+          # Extract JSON from <review_report> tags
+          python3 << 'PYTHON_SCRIPT'
+          import sys
+          import json
+          import re
 
-          # Move it back
-          mv clean_report.md review_report.md
+          with open('review_report.md', 'r') as f:
+              content = f.read()
 
-      - name: Finalize Report
+          # Extract content between tags
+          match = re.search(r'<review_report>(.*?)</review_report>', content, re.DOTALL)
+          if not match:
+              print("Error: No <review_report> tags found", file=sys.stderr)
+              sys.exit(1)
+
+          json_str = match.group(1).strip()
+
+          # Remove markdown code fences if present
+          json_str = re.sub(r'^```json\s*', '', json_str)
+          json_str = re.sub(r'\s*```$', '', json_str)
+
+          # Parse and validate JSON
+          try:
+              data = json.loads(json_str)
+          except json.JSONDecodeError as e:
+              print(f"Error: Invalid JSON - {e}", file=sys.stderr)
+              print(f"Content: {json_str}", file=sys.stderr)
+              sys.exit(1)
+
+          # Save JSON for later use
+          with open('review.json', 'w') as f:
+              json.dump(data, f, indent=2)
+
+          # Convert to markdown
+          def severity_emoji(severity):
+              return {"HIGH": "🔴 HIGH", "MEDIUM": "🟡 MEDIUM", "LOW": "🟢 LOW"}.get(severity, severity)
+
+          markdown = []
+          if data.get("approved"):
+              markdown.append("✅ **Approved**\n")
+              markdown.append("**Summary**")
+              markdown.append(data["summary"])
+          else:
+              markdown.append("**Summary**")
+              markdown.append(data.get("summary", "Issues found during review."))
+              markdown.append("")
+              markdown.append("| # | Severity | Category | Issue | Suggested Fix | Location |")
+              markdown.append("|---|----------|----------|-------|---------------|----------|")
+              for idx, issue in enumerate(data.get("issues", []), 1):
+                  sev = severity_emoji(issue["severity"])
+                  cat = issue["category"]
+                  desc = issue["issue"].replace("|", "\\|").replace("\n", " ")
+                  fix = issue["fix"].replace("|", "\\|").replace("\n", " ")
+                  loc = f"{issue['file']}:{issue['line']}"
+                  markdown.append(f"| {idx} | {sev} | {cat} | {desc} | {fix} | {loc} |")
+
+          with open('review_markdown.md', 'w') as f:
+              f.write('\n'.join(markdown))
+
+          print("✓ Review JSON extracted and markdown generated")
+          PYTHON_SCRIPT
+
+      - name: Finalize Report for PR Comment
         if: ${{ steps.review.outcome == 'success' }}
         run: |
-          # Prepend header and append state marker
+          # Build final PR comment with header and SHA
           echo "## 🕵️‍♂️ Claude Review" > final_report.md
           echo "" >> final_report.md
-          cat review_report.md >> final_report.md
+          cat review_markdown.md >> final_report.md
           echo "" >> final_report.md
           echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> final_report.md
-          mv final_report.md review_report.md
+
+      - name: Update Check Run with Annotations
+        if: ${{ steps.review.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the review JSON
+            const reviewData = JSON.parse(fs.readFileSync('review.json', 'utf8'));
+
+            const checkRunId = ${{ steps.create-check.outputs.check_run_id }};
+            const approved = reviewData.approved;
+            const issues = reviewData.issues || [];
+
+            // Map severity to GitHub annotation level
+            const severityMap = {
+              'HIGH': 'failure',
+              'MEDIUM': 'warning',
+              'LOW': 'notice'
+            };
+
+            // Build annotations array
+            const annotations = issues.map(issue => ({
+              path: issue.file,
+              start_line: issue.line,
+              end_line: issue.line,
+              annotation_level: severityMap[issue.severity] || 'warning',
+              message: `${issue.issue}\n\n**Suggested Fix:** ${issue.fix}`,
+              title: `[${issue.severity}] ${issue.category}`
+            }));
+
+            // GitHub API allows max 50 annotations per request
+            const batchSize = 50;
+            for (let i = 0; i < annotations.length; i += batchSize) {
+              const batch = annotations.slice(i, i + batchSize);
+
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: checkRunId,
+                output: {
+                  title: 'Claude Review',
+                  summary: approved
+                    ? `✅ No issues found\n\n${reviewData.summary}`
+                    : `${issues.length} issue${issues.length !== 1 ? 's' : ''} found`,
+                  text: approved ? undefined : reviewData.summary,
+                  annotations: batch
+                }
+              });
+            }
+
+            // Complete the check run
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: checkRunId,
+              status: 'completed',
+              conclusion: approved ? 'success' : 'failure',
+              completed_at: new Date().toISOString()
+            });
+
+            console.log(`✓ Check Run completed: ${approved ? 'success' : 'failure'} with ${annotations.length} annotations`);
 
       - name: Post Success Comment
         if: ${{ steps.review.outcome == 'success' }}
@@ -224,8 +387,31 @@ jobs:
         with:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: review_report.md
+          body-path: final_report.md
           edit-mode: replace
+
+      - name: Complete Check Run on Failure
+        if: ${{ steps.review.outcome == 'failure' || steps.review.outcome == 'skipped' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkRunId = ${{ steps.create-check.outputs.check_run_id }};
+
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: checkRunId,
+              status: 'completed',
+              conclusion: 'action_required',
+              completed_at: new Date().toISOString(),
+              output: {
+                title: 'Claude Review',
+                summary: '❌ Review failed to complete',
+                text: 'The Claude review encountered an error. Please check the workflow logs for details.'
+              }
+            });
+
+            console.log('✓ Check Run completed with action_required status');
 
       - name: Post Failure Comment
         if: ${{ steps.review.outcome == 'failure' }}
@@ -234,7 +420,9 @@ jobs:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            :x: Claude review failed to complete.
+            ## 🕵️‍♂️ Claude Review
+
+            ❌ Claude review failed to complete.
 
             [View workflow run for details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           edit-mode: replace

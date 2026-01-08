@@ -109,32 +109,51 @@ APPROVE if:
 
 Your response MUST be wrapped in `<review_report>` tags.
 You may include reasoning or analysis BEFORE the opening tag, but it will be discarded.
-Only the content INSIDE the tags will be posted to the PR.
+Only the content INSIDE the tags will be used for processing.
 
-### If approval criteria are met (EXPECTED outcome):
+### Inside the tags, output VALID JSON ONLY in this format:
 
-<review_report>
-✅ **Approved**
+**If approval criteria are met:**
+```json
+{
+  "approved": true,
+  "summary": "2-3 concise sentences describing exactly what changed in the PR and the specific scope you verified"
+}
+```
 
-**Summary**
-2-3 concise sentences describing exactly what changed in the PR and the specific scope you verified
-</review_report>
+**If issues are found:**
+```json
+{
+  "approved": false,
+  "summary": "Brief overview of the issues found",
+  "issues": [
+    {
+      "severity": "HIGH",
+      "category": "Security",
+      "issue": "Brief description of the issue",
+      "fix": "Actionable suggested fix",
+      "file": "path/to/file.ext",
+      "line": 42
+    }
+  ]
+}
+```
 
-### If issues are found:
+### Field Specifications:
 
-<review_report>
-| # | Severity | Category | Issue | Suggested Fix | Location |
-|---|----------|----------|----------|-------|-----|
-| 1 | 🔴 HIGH | Security | Brief description | Actionable fix | path/to/file.ext:line |
-</review_report>
+- `approved` (boolean): `true` if no issues, `false` if issues found
+- `summary` (string): 2-3 sentences describing changes and verification scope
+- `issues` (array): Only present when `approved` is `false`
+  - `severity` (string): Must be exactly one of: `"HIGH"`, `"MEDIUM"`, `"LOW"`
+  - `category` (string): Issue category (e.g., "Security", "Correctness", "Performance", "Testing")
+  - `issue` (string): Brief description of the problem
+  - `fix` (string): Actionable suggestion to fix the issue
+  - `file` (string): Relative path to the file from repository root
+  - `line` (number): Line number where the issue occurs
 
 ### Output Rules (MANDATORY)
 
 - **WRAP ALL OUTPUT IN `<review_report>` and `</review_report>` TAGS.**
-- Inside the tags:
-  - If approved: Start immediately with ✅ **Approved** followed by summary
-  - If issues found: Start immediately with the markdown table
-  - No header, no text before or after the formatted output
-  - Use markdown table format
-  - One issue per table row
-- Outside the tags: You can write your analysis, verification steps, and reasoning.
+- Inside the tags: Output ONLY valid JSON (no markdown code fences, no extra text)
+- Outside the tags: You can write your analysis, verification steps, and reasoning
+- Ensure JSON is valid: use double quotes, escape special characters, no trailing commas
