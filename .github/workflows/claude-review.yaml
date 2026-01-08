@@ -151,7 +151,7 @@ jobs:
         run: |
           mkdir -p changed_files
 
-          git diff --name-only ${{ env.DIFF_BASE }}...HEAD | while IFS= read -r file; do
+          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | while IFS= read -r file; do
             if [ -f "$file" ]; then
               target_dir="changed_files/$(dirname "$file")"
               mkdir -p "$target_dir"
@@ -167,9 +167,12 @@ jobs:
 
           EOF
 
-          git diff --name-only ${{ env.DIFF_BASE }}...HEAD >> changed_files_list.txt
+          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD >> changed_files_list.txt
 
-          echo "Prepared $(git diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l) changed files"
+          # Generate unified diff showing all changes
+          git --no-pager diff ${{ env.DIFF_BASE }}...HEAD > unified_diff.txt
+
+          echo "Prepared $(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l) changed files with diff"
 
       - name: Setup Node.js
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
