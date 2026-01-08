@@ -64,6 +64,8 @@ You MUST do the following before reporting any issue:
    - Ensure edge cases and error paths are tested
    - Verify tests are isolated with proper setup/teardown
    - **If tests are missing, inadequate, or incorrect, this is a BLOCKING issue**
+   - **Important:** Lack of tests elsewhere in the project is NOT an excuse for new code to skip tests
+   - **Only exception:** Trivial changes (typos in comments, pure UI styling, documentation) may skip tests
 
 7. **Verify Fixes (If Context Provided):**
    - Check if issues from `Previous Review Context` have been resolved
