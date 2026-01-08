@@ -82,3 +82,20 @@ export function toDateOnly(value?: string | Date | null): string {
     return "";
   }
 }
+
+/**
+ * Check if a given date is in the past
+ * @param dateString - ISO date string or Date object
+ * @returns True if the date is in the past, false otherwise
+ */
+export const isPastDate = (dateString: string | Date): boolean => {
+  const date =
+    typeof dateString === "string" ? new Date(dateString) : dateString;
+
+  // Return false for invalid dates
+  if (isNaN(date.getTime())) {
+    return false;
+  }
+
+  return date.getTime() < Date.now();
+};
