@@ -536,10 +536,71 @@ jobs:
               i.status === 'resolved' && i.comment_id
             );
 
-            console.log(`Resolved issues with comment IDs: ${resolvedWithComments}`);
+            console.log(`Resolved issues with comment IDs: ${resolvedWithComments.length}`);
 
             if (resolvedWithComments.length === 0) {
               console.log('No resolved issues with comment IDs to resolve');
+              return;
+            }
+
+            console.log(`\n=== BUILDING COMMENT-TO-THREAD MAPPING ===`);
+
+            // Build mapping from comment node_id to review thread
+            const commentNodeIdToThreadMapping = {};
+
+            try {
+              // First, get the PR's node ID using REST API
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+
+              console.log(`PR node ID: ${pr.data.node_id}`);
+
+              // Use the node ID to query review threads
+              const queryData = await github.graphql(`
+                query($prNodeId: ID!) {
+                  node(id: $prNodeId) {
+                    ... on PullRequest {
+                      reviewThreads(last: 100) {
+                        totalCount
+                        nodes {
+                          id
+                          isResolved
+                          comments(last: 100) {
+                            totalCount
+                            nodes {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, {
+                prNodeId: pr.data.node_id
+              });
+
+              const reviewThreads = queryData?.node?.reviewThreads?.nodes;
+
+              if (reviewThreads) {
+                console.log(`Found ${reviewThreads.length} review threads`);
+                for (const thread of reviewThreads) {
+                  if (thread?.comments?.nodes) {
+                    for (const comment of thread.comments.nodes) {
+                      if (comment?.id) {
+                        commentNodeIdToThreadMapping[comment.id] = thread;
+                      }
+                    }
+                  }
+                }
+                console.log(`Built mapping for ${Object.keys(commentNodeIdToThreadMapping).length} comments`);
+              }
+            } catch (error) {
+              console.error(`Failed to build comment-to-thread mapping: ${error.message}`);
+              console.error(`Error details: ${JSON.stringify(error, null, 2)}`);
               return;
             }
 
@@ -547,7 +608,7 @@ jobs:
 
             const results = { success: [], failed: [] };
 
-            // GitHub GraphQL API to resolve review threads
+            // Resolve threads for resolved issues
             for (const issue of resolvedWithComments) {
               console.log(`\nResolving comment ${issue.comment_id} for ${issue.file}:${issue.line || 'N/A'}...`);
 
@@ -559,44 +620,42 @@ jobs:
                   comment_id: issue.comment_id
                 });
 
-                // Use GraphQL to get the thread ID from the comment
-                const query = `
-                  query {
-                    node(id: "${comment.data.node_id}") {
-                      ... on PullRequestReviewComment {
-                        thread {
-                          id
-                          isResolved
-                        }
-                      }
-                    }
-                  }
-                `;
+                const commentNodeId = comment.data.node_id;
+                const reviewThread = commentNodeIdToThreadMapping[commentNodeId];
 
-                const queryResult = await github.graphql(query);
-                const threadId = queryResult.node.thread.id;
-                const isResolved = queryResult.node.thread.isResolved;
+                if (!reviewThread) {
+                  console.log(`  ⚠️  No review thread found for comment`);
+                  results.failed.push({
+                    file: issue.file,
+                    line: issue.line,
+                    commentId: issue.comment_id,
+                    error: 'No review thread found'
+                  });
+                  continue;
+                }
 
-                if (isResolved) {
-                  console.log(`  ℹ️ Thread already resolved, skipping`);
+                if (reviewThread.isResolved) {
+                  console.log(`  ℹ️  Thread already resolved, skipping`);
                   results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
                   continue;
                 }
 
-                // Resolve the thread using the thread ID
-                const mutation = `
-                  mutation {
-                    resolveReviewThread(input: {threadId: "${threadId}"}) {
+                // Resolve the thread
+                await github.graphql(`
+                  mutation($threadId: ID!) {
+                    resolveReviewThread(input: {threadId: $threadId}) {
                       thread {
+                        id
                         isResolved
                       }
                     }
                   }
-                `;
+                `, {
+                  threadId: reviewThread.id
+                });
 
-                await github.graphql(mutation);
                 results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
-                console.log(`  ✓ SUCCESS - Resolved thread ${threadId}`);
+                console.log(`  ✓ SUCCESS - Resolved thread ${reviewThread.id}`);
               } catch (error) {
                 results.failed.push({
                   file: issue.file,
