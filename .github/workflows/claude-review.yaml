@@ -324,7 +324,7 @@ jobs:
 
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
 
-            // Filter new issues with line numbers and existing files only
+            // Filter new issues with line numbers and files
             const newLineIssues = state.issues.filter(i => {
               if (i.status !== 'new' || !i.line || !i.file) return false;
               // Only comment on files that exist in the checkout
@@ -336,38 +336,144 @@ jobs:
               return;
             }
 
-            console.log(`Creating ${newLineIssues.length} inline comments...`);
+            console.log(`\n=== INLINE COMMENT DEBUG INFO ===`);
+            console.log(`Found ${newLineIssues.length} new line-specific issues`);
+            console.log(`Commit SHA: ${{ steps.get-pr-details.outputs.head_sha }}`);
 
-            const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
-            const comments = newLineIssues.map(issue => ({
-              path: issue.file,
-              line: issue.line,
-              side: 'RIGHT',
-              body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
-            }));
-
+            // Get list of changed files in the PR to validate against
+            let changedFiles = null;
             try {
-              const review = await github.rest.pulls.createReview({
+              const filesResponse = await github.rest.pulls.listFiles({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number,
-                commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
-                event: 'COMMENT',
-                comments
+                pull_number: context.issue.number
               });
-
-              console.log(`Created review with ${review.data.comments.length} inline comments`);
-
-              // Update state with comment IDs
-              const commentIds = review.data.comments.map(c => c.id);
-              newLineIssues.forEach((issue, i) => {
-                issue.comment_id = commentIds[i];
+              changedFiles = new Set(filesResponse.data.map(f => f.filename));
+              console.log(`\nPR has ${changedFiles.size} changed files:`);
+              filesResponse.data.forEach(f => {
+                console.log(`  - ${f.filename} (status: ${f.status}, changes: +${f.additions}/-${f.deletions})`);
               });
-
-              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
             } catch (error) {
-              console.error('Failed to create inline comments:', error.message);
-              // Continue anyway - summary comment will still be posted
+              console.error('Warning: Could not fetch PR files for validation:', error.message);
+            }
+
+            // Validate and prepare comments
+            const validatedIssues = [];
+            const skippedIssues = [];
+
+            console.log(`\n=== VALIDATING COMMENTS ===`);
+            newLineIssues.forEach((issue, idx) => {
+              console.log(`\nComment ${idx + 1}/${newLineIssues.length}:`);
+              console.log(`  File: ${issue.file}`);
+              console.log(`  Line: ${issue.line}`);
+              console.log(`  Category: ${issue.category}`);
+              console.log(`  Severity: ${issue.severity}`);
+              console.log(`  File exists in checkout: ${fs.existsSync(issue.file)}`);
+
+              // Validate file is in PR changes
+              if (changedFiles && !changedFiles.has(issue.file)) {
+                console.log(`  ❌ SKIP: File not in PR changed files`);
+                skippedIssues.push({ issue, reason: 'File not in PR changes' });
+                return;
+              }
+
+              console.log(`  ✓ File is in PR changes`);
+              validatedIssues.push(issue);
+            });
+
+            if (validatedIssues.length === 0) {
+              console.log('\n❌ No valid issues to comment on after validation');
+              if (skippedIssues.length > 0) {
+                console.log(`\nSkipped ${skippedIssues.length} issues:`);
+                skippedIssues.forEach(s => {
+                  console.log(`  - ${s.issue.file}:${s.issue.line} - ${s.reason}`);
+                });
+              }
+              return;
+            }
+
+            console.log(`\n=== POSTING COMMENTS (${validatedIssues.length} valid) ===`);
+
+            const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
+            const results = { success: [], failed: [] };
+
+            // Post comments individually to handle partial failures
+            for (let i = 0; i < validatedIssues.length; i++) {
+              const issue = validatedIssues[i];
+              console.log(`\n[${i + 1}/${validatedIssues.length}] Posting comment for ${issue.file}:${issue.line}...`);
+
+              const comment = {
+                path: issue.file,
+                line: issue.line,
+                side: 'RIGHT',
+                body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
+              };
+
+              console.log(`  Comment object: ${JSON.stringify(comment, null, 2)}`);
+
+              try {
+                const review = await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
+                  event: 'COMMENT',
+                  comments: [comment]
+                });
+
+                const commentId = review.data.comments[0]?.id;
+                issue.comment_id = commentId;
+                results.success.push({ file: issue.file, line: issue.line, commentId });
+                console.log(`  ✓ SUCCESS - Comment ID: ${commentId}`);
+              } catch (error) {
+                const errorDetails = {
+                  message: error.message,
+                  status: error.status,
+                  response: error.response?.data
+                };
+                results.failed.push({
+                  file: issue.file,
+                  line: issue.line,
+                  error: errorDetails
+                });
+                console.error(`  ✗ FAILED - ${error.message}`);
+                if (error.response?.data) {
+                  console.error(`  Error details: ${JSON.stringify(error.response.data, null, 2)}`);
+                }
+              }
+            }
+
+            // Save updated state with successful comment IDs
+            fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+
+            // Print summary
+            console.log(`\n=== SUMMARY ===`);
+            console.log(`✓ Successfully posted: ${results.success.length}/${validatedIssues.length} comments`);
+            if (results.success.length > 0) {
+              console.log('Success:');
+              results.success.forEach(r => {
+                console.log(`  ✓ ${r.file}:${r.line} (comment ID: ${r.commentId})`);
+              });
+            }
+
+            if (results.failed.length > 0) {
+              console.log(`\n✗ Failed: ${results.failed.length} comments`);
+              results.failed.forEach(r => {
+                console.log(`  ✗ ${r.file}:${r.line}`);
+                console.log(`    Reason: ${r.error.message}`);
+                if (r.error.response?.errors) {
+                  r.error.response.errors.forEach(e => {
+                    console.log(`    - ${JSON.stringify(e)}`);
+                  });
+                }
+              });
+            }
+
+            if (skippedIssues.length > 0) {
+              console.log(`\n⊘ Skipped: ${skippedIssues.length} comments`);
+              skippedIssues.forEach(s => {
+                console.log(`  ⊘ ${s.issue.file}:${s.issue.line} - ${s.reason}`);
+              });
             }
 
       - name: Generate Markdown Summary
