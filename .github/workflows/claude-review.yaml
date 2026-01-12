@@ -402,26 +402,21 @@ jobs:
               const issue = validatedIssues[i];
               console.log(`\n[${i + 1}/${validatedIssues.length}] Posting comment for ${issue.file}:${issue.line}...`);
 
-              const comment = {
-                path: issue.file,
-                line: issue.line,
-                side: 'RIGHT',
-                body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
-              };
-
-              console.log(`  Comment object: ${JSON.stringify(comment, null, 2)}`);
+              const body = `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`;
 
               try {
-                const review = await github.rest.pulls.createReview({
+                const response = await github.rest.pulls.createReviewComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   pull_number: context.issue.number,
                   commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
-                  event: 'COMMENT',
-                  comments: [comment]
+                  path: issue.file,
+                  line: issue.line,
+                  side: 'RIGHT',
+                  body: body
                 });
 
-                const commentId = review.data.comments[0]?.id;
+                const commentId = response.data.id;
                 issue.comment_id = commentId;
                 results.success.push({ file: issue.file, line: issue.line, commentId });
                 console.log(`  ✓ SUCCESS - Comment ID: ${commentId}`);
@@ -521,7 +516,7 @@ jobs:
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
 
             console.log(`\n=== RESOLVED ISSUES DEBUG ===`);
-            console.log(`Total issues in state: ${state.issues}`);
+            console.log(`Total issues in state: ${state.issues.length}`);
 
             const resolvedIssues = state.issues.filter(i => i.status === 'resolved');
             console.log(`Issues with status=resolved: ${resolvedIssues.length}`);
