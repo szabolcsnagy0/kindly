@@ -476,6 +476,35 @@ jobs:
               });
             }
 
+      - name: Find Existing Results Comment
+        if: ${{ steps.review.outcome == 'success' }}
+        id: find-results-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- claude-review-results -->';
+
+            // Find existing results comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const resultsComment = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (resultsComment) {
+              console.log(`Found existing results comment: ${resultsComment.id}`);
+              core.setOutput('exists', 'true');
+              core.setOutput('comment_id', resultsComment.id);
+            } else {
+              console.log('No results comment found - will use running comment as results');
+              core.setOutput('exists', 'false');
+              core.setOutput('comment_id', '');
+            }
+
       - name: Resolve Inline Comments for Resolved Issues
         if: ${{ steps.review.outcome == 'success' }}
         continue-on-error: true
@@ -551,32 +580,26 @@ jobs:
               });
             }
 
-      - name: Find or Create Sticky Results Comment
+      - name: Re-encode State with Comment IDs
         if: ${{ steps.review.outcome == 'success' }}
-        id: sticky-comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const marker = '<!-- claude-review-results -->';
+        run: |
+          python3 <<'PYTHON_SCRIPT'
+          import json
+          import gzip
+          import base64
 
-            // Find existing sticky comment
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
+          # State was updated by inline comments step with comment_ids
+          with open('state.json', 'r') as f:
+              state = json.load(f)
 
-            const stickyComment = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes(marker)
-            );
+          # Re-compress state for comment (now includes comment_ids)
+          compressed = gzip.compress(json.dumps(state).encode())
+          encoded = base64.b64encode(compressed).decode()
+          with open('state_encoded.txt', 'w') as f:
+              f.write(encoded)
 
-            if (stickyComment) {
-              console.log(`Found existing sticky comment: ${stickyComment.id}`);
-              core.setOutput('comment_id', stickyComment.id);
-            } else {
-              console.log('No sticky comment found, will create new one');
-              core.setOutput('comment_id', '');
-            }
+          print("Re-encoded state with comment IDs")
+          PYTHON_SCRIPT
 
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}
@@ -645,17 +668,26 @@ jobs:
           print("Generated markdown summary")
           PYTHON_SCRIPT
 
-      - name: Post Sticky Results Comment
-        if: ${{ steps.review.outcome == 'success' }}
+      - name: Post Results Comment (First Run)
+        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'false' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
-          comment-id: ${{ steps.sticky-comment.outputs.comment_id }}
+          comment-id: ${{ steps.running-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body-path: summary.md
           edit-mode: replace
 
-      - name: Update Running Comment - Success
-        if: ${{ steps.review.outcome == 'success' }}
+      - name: Update Results Comment (Subsequent Runs)
+        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'true' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-results-comment.outputs.comment_id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body-path: summary.md
+          edit-mode: replace
+
+      - name: Update Running Comment (Subsequent Runs)
+        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'true' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.running-comment.outputs.comment-id }}
@@ -663,7 +695,7 @@ jobs:
           body: |
             ## ✅ Claude Review Complete
 
-            Review finished successfully! See the results in the pinned comment below.
+            Review finished successfully! See the [results comment](https://github.com/${{ github.repository }}/pull/${{ env.GITHUB_PR_NUMBER }}#issuecomment-${{ steps.find-results-comment.outputs.comment_id }}).
 
             [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           edit-mode: replace
