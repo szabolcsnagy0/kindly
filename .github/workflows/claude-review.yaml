@@ -520,10 +520,28 @@ jobs:
 
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
 
+            console.log(`\n=== RESOLVED ISSUES DEBUG ===`);
+            console.log(`Total issues in state: ${state.issues}`);
+
+            const resolvedIssues = state.issues.filter(i => i.status === 'resolved');
+            console.log(`Issues with status=resolved: ${resolvedIssues.length}`);
+
+            if (resolvedIssues.length > 0) {
+              console.log('\nResolved issues:');
+              resolvedIssues.forEach((issue, idx) => {
+                console.log(`  ${idx + 1}. ${issue.file}:${issue.line || 'N/A'}`);
+                console.log(`     Category: ${issue.category}`);
+                console.log(`     Has comment_id: ${!!issue.comment_id}`);
+                console.log(`     comment_id value: ${issue.comment_id || 'null'}`);
+              });
+            }
+
             // Find resolved issues that have comment IDs
             const resolvedWithComments = state.issues.filter(i =>
               i.status === 'resolved' && i.comment_id
             );
+
+            console.log(`Resolved issues with comment IDs: ${resolvedWithComments}`);
 
             if (resolvedWithComments.length === 0) {
               console.log('No resolved issues with comment IDs to resolve');
