@@ -552,17 +552,41 @@ jobs:
               console.log(`\nResolving comment ${issue.comment_id} for ${issue.file}:${issue.line || 'N/A'}...`);
 
               try {
-                // Get the comment to find its thread ID
+                // Get the comment's node_id
                 const comment = await github.rest.pulls.getReviewComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   comment_id: issue.comment_id
                 });
 
-                // Use GraphQL to resolve the thread
+                // Use GraphQL to get the thread ID from the comment
+                const query = `
+                  query {
+                    node(id: "${comment.data.node_id}") {
+                      ... on PullRequestReviewComment {
+                        pullRequestReviewThread {
+                          id
+                          isResolved
+                        }
+                      }
+                    }
+                  }
+                `;
+
+                const queryResult = await github.graphql(query);
+                const threadId = queryResult.node.pullRequestReviewThread.id;
+                const isResolved = queryResult.node.pullRequestReviewThread.isResolved;
+
+                if (isResolved) {
+                  console.log(`  ℹ️ Thread already resolved, skipping`);
+                  results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
+                  continue;
+                }
+
+                // Resolve the thread using the thread ID
                 const mutation = `
                   mutation {
-                    resolveReviewThread(input: {threadId: "${comment.data.node_id}"}) {
+                    resolveReviewThread(input: {threadId: "${threadId}"}) {
                       thread {
                         isResolved
                       }
@@ -572,7 +596,7 @@ jobs:
 
                 await github.graphql(mutation);
                 results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
-                console.log(`  ✓ SUCCESS - Resolved thread for comment ${issue.comment_id}`);
+                console.log(`  ✓ SUCCESS - Resolved thread ${threadId}`);
               } catch (error) {
                 results.failed.push({
                   file: issue.file,
