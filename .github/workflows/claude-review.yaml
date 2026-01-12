@@ -311,6 +311,7 @@ jobs:
 
       - name: Create Inline Comments
         if: ${{ steps.review.outcome == 'success' }}
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -325,7 +326,7 @@ jobs:
 
             // Filter new issues with line numbers and existing files only
             const newLineIssues = state.issues.filter(i => {
-              if (!i.status === 'new' || !i.line || !i.file) return false;
+              if (i.status !== 'new' || !i.line || !i.file) return false;
               // Only comment on files that exist in the checkout
               return fs.existsSync(i.file);
             });
