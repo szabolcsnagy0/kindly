@@ -107,34 +107,33 @@ APPROVE if:
 
 ## Output Format (STRICT – FOLLOW EXACTLY)
 
-Your response MUST be wrapped in `<review_report>` tags.
+Your response MUST be valid JSON wrapped in `<review_output>` tags.
 You may include reasoning or analysis BEFORE the opening tag, but it will be discarded.
-Only the content INSIDE the tags will be posted to the PR.
+Only the JSON INSIDE the tags will be processed.
 
-### If approval criteria are met (EXPECTED outcome):
-
-<review_report>
-✅ **Approved**
-
-**Summary**
-2-3 concise sentences describing exactly what changed in the PR and the specific scope you verified
-</review_report>
-
-### If issues are found:
-
-<review_report>
-| # | Severity | Category | Issue | Suggested Fix | Location |
-|---|----------|----------|----------|-------|-----|
-| 1 | 🔴 HIGH | Security | Brief description | Actionable fix | path/to/file.ext:line |
-</review_report>
+<review_output>
+{
+  "summary": "2-3 sentences: what changed and what you verified",
+  "issues": [
+    {
+      "severity": "high" | "medium" | "low",
+      "category": "Security" | "Correctness" | "Performance" | "Testing" | "Architecture" | "Code Quality",
+      "description": "What's wrong and why it matters",
+      "suggested_fix": "How to fix it",
+      "file": "path/to/file.ts",
+      "line": 42
+    }
+  ]
+}
+</review_output>
 
 ### Output Rules (MANDATORY)
 
-- **WRAP ALL OUTPUT IN `<review_report>` and `</review_report>` TAGS.**
-- Inside the tags:
-  - If approved: Start immediately with ✅ **Approved** followed by summary
-  - If issues found: Start immediately with the markdown table
-  - No header, no text before or after the formatted output
-  - Use markdown table format
-  - One issue per table row
+- **WRAP ALL OUTPUT IN `<review_output>` and `</review_output>` TAGS.**
+- The content inside tags MUST be valid JSON
+- File paths must be relative to repository root
+- Line numbers must be precise
+- Empty issues array if no issues found (approved)
+- Omit `line` field for general/architectural issues (issues without specific line)
+- Keep descriptions concise but informative
 - Outside the tags: You can write your analysis, verification steps, and reasoning.

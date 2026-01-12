@@ -74,36 +74,53 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const zlib = require('zlib');
+
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number: context.issue.number
             });
 
-            // Find last comment by bot that contains a review SHA
-            // We look for the hidden comment format <!-- review-sha: SHA -->
+            // Find last comment by bot that contains state
             const botComments = comments.data
-              .filter(c => c.user.type === 'Bot' && c.body.includes('<!-- review-sha:'))
-              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+              .filter(c => c.user.type === 'Bot' && c.body.includes('<!-- state:'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-            const lastComment = botComments.length > 0 ? botComments[botComments.length - 1] : null;
+            const botComment = botComments.length > 0 ? botComments[0] : null;
 
-            if (lastComment) {
-              const match = lastComment.body.match(/<!-- review-sha: (\w+) -->/);
-              if (match) {
-                console.log(`Found previous review SHA: ${match[1]}`);
-                core.setOutput('previous_sha', match[1]);
-
-                // Export the body as context for the prompt
-                // Using multiline delimiter for safety
-                core.exportVariable('PREVIOUS_REVIEW_CONTEXT', lastComment.body);
-                return;
-              }
+            if (!botComment) {
+              console.log('No previous state found');
+              core.setOutput('state', '{}');
+              core.setOutput('previous_sha', '');
+              return;
             }
 
-            console.log('No previous valid review found.');
-            core.setOutput('previous_sha', '');
-            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous review found.');
+            // Extract state
+            const match = botComment.body.match(/<!-- state:([A-Za-z0-9+/=]+) -->/);
+            if (!match) {
+              console.log('No state marker found in comment');
+              core.setOutput('state', '{}');
+              core.setOutput('previous_sha', '');
+              return;
+            }
+
+            try {
+              // Decompress state
+              const compressed = Buffer.from(match[1], 'base64');
+              const json = zlib.gunzipSync(compressed).toString('utf-8');
+              const state = JSON.parse(json);
+
+              console.log(`Loaded previous state from SHA ${state.review_sha}`);
+              console.log(`Previous state has ${state.issues?.length || 0} issues`);
+
+              core.setOutput('state', json);
+              core.setOutput('previous_sha', state.review_sha);
+            } catch (error) {
+              console.error('Failed to parse previous state:', error.message);
+              core.setOutput('state', '{}');
+              core.setOutput('previous_sha', '');
+            }
 
       - name: Determine Review Mode & Diff Base
         id: determine-mode
@@ -185,6 +202,12 @@ jobs:
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Setup Python
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Run Claude Review
         id: review
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
@@ -195,36 +218,219 @@ jobs:
           CI: true
           # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT are already in env
         run: |
-          claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_report.md
-          cat review_report.md
+          claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_output.txt
+          cat review_output.txt
 
-      - name: Extract Report Content
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        run: |
-          # Extract content between <review_report> tags
-          python3 -c "import sys; content = sys.stdin.read(); start = content.find('<review_report>'); end = content.find('</review_report>'); print(content[start+15:end].strip() if start != -1 and end != -1 else 'Error: No valid report tags found. \n ${content}')" < review_report.md > clean_report.md
-
-          # Move it back
-          mv clean_report.md review_report.md
-
-      - name: Finalize Report
+      - name: Process Review
         if: ${{ steps.review.outcome == 'success' }}
         run: |
-          # Prepend header and append state marker
-          echo "## 🕵️‍♂️ Claude Review" > final_report.md
-          echo "" >> final_report.md
-          cat review_report.md >> final_report.md
-          echo "" >> final_report.md
-          echo "<!-- review-sha: ${{ steps.get-pr-details.outputs.head_sha }} -->" >> final_report.md
-          mv final_report.md review_report.md
+          python3 <<'PYTHON_SCRIPT'
+          import json
+          import gzip
+          import base64
+          import hashlib
+          import os
 
-      - name: Post Success Comment
+          # Load Claude's output
+          with open('review_output.txt', 'r') as f:
+              content = f.read()
+              start = content.find('<review_output>')
+              end = content.find('</review_output>')
+              if start == -1 or end == -1:
+                  print("ERROR: No valid <review_output> tags found")
+                  exit(1)
+              review = json.loads(content[start+15:end])
+
+          # Load previous state from environment
+          prev_state = json.loads(os.getenv('PREVIOUS_STATE', '{}'))
+          current_sha = os.getenv('HEAD_SHA')
+
+          # Generate issue IDs
+          def generate_id(issue):
+              file = issue.get('file', '')
+              line = issue.get('line', 0)
+              category = issue.get('category', '')
+              description = issue.get('description', '')
+              content = f"{file.lower()}::{line}::{category.lower()}::{description.lower().strip()[:100]}"
+              return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+          # Match issues against previous state
+          prev_by_id = {i['id']: i for i in prev_state.get('issues', [])}
+          new_issues = []
+
+          for issue in review.get('issues', []):
+              issue_id = generate_id(issue)
+              prev = prev_by_id.get(issue_id)
+
+              new_issues.append({
+                  'id': issue_id,
+                  'status': 'persisted' if prev else 'new',
+                  'comment_id': prev.get('comment_id') if prev else None,
+                  **issue
+              })
+              prev_by_id.pop(issue_id, None)
+
+          # Remaining prev issues are resolved
+          for prev in prev_by_id.values():
+              new_issues.append({**prev, 'status': 'resolved'})
+
+          # Create state
+          state = {
+              'review_sha': current_sha,
+              'summary': review.get('summary', 'Review completed'),
+              'issues': new_issues
+          }
+
+          # Save state
+          with open('state.json', 'w') as f:
+              json.dump(state, f, indent=2)
+
+          # Save compressed state for comment
+          compressed = gzip.compress(json.dumps(state).encode())
+          encoded = base64.b64encode(compressed).decode()
+          with open('state_encoded.txt', 'w') as f:
+              f.write(encoded)
+
+          print(f"Processed {len(review.get('issues', []))} current issues")
+          print(f"Found {sum(1 for i in new_issues if i['status'] == 'new')} new issues")
+          print(f"Found {sum(1 for i in new_issues if i['status'] == 'persisted')} persisted issues")
+          print(f"Found {sum(1 for i in new_issues if i['status'] == 'resolved')} resolved issues")
+          PYTHON_SCRIPT
+        env:
+          PREVIOUS_STATE: ${{ steps.get-state.outputs.state }}
+          HEAD_SHA: ${{ steps.get-pr-details.outputs.head_sha }}
+
+      - name: Create Inline Comments
+        if: ${{ steps.review.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('state.json')) {
+              console.log('No state.json found, skipping inline comments');
+              return;
+            }
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+
+            // Filter new issues with line numbers
+            const newLineIssues = state.issues.filter(i =>
+              i.status === 'new' && i.line
+            );
+
+            if (newLineIssues.length === 0) {
+              console.log('No new line-specific issues to comment on');
+              return;
+            }
+
+            console.log(`Creating ${newLineIssues.length} inline comments...`);
+
+            // Create review with inline comments
+            const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
+            const comments = newLineIssues.map(issue => ({
+              path: issue.file,
+              line: issue.line,
+              body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
+            }));
+
+            try {
+              const review = await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
+                event: 'COMMENT',
+                comments
+              });
+
+              console.log(`Created review with ${review.data.comments.length} comments`);
+
+              // Update state with comment IDs
+              const commentIds = review.data.comments.map(c => c.id);
+              newLineIssues.forEach((issue, i) => {
+                issue.comment_id = commentIds[i];
+              });
+
+              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+            } catch (error) {
+              console.error('Failed to create inline comments:', error.message);
+              // Continue anyway - summary comment will still be posted
+            }
+
+      - name: Generate Markdown Summary
+        if: ${{ steps.review.outcome == 'success' }}
+        run: |
+          python3 <<'PYTHON_SCRIPT'
+          import json
+
+          with open('state.json') as f:
+              state = json.load(f)
+          with open('state_encoded.txt') as f:
+              encoded = f.read()
+
+          active = [i for i in state['issues'] if i['status'] != 'resolved']
+          resolved = [i for i in state['issues'] if i['status'] == 'resolved']
+
+          md = "## 🕵️‍♂️ Claude Review\n\n"
+
+          if not active:
+              md += "✅ **Approved**\n\n" + state['summary']
+          else:
+              new_count = sum(1 for i in active if i['status'] == 'new')
+              pers_count = sum(1 for i in active if i['status'] == 'persisted')
+
+              md += f"**Summary:** {state['summary']}\n\n"
+              md += f"**Issues:** {len(active)} active ({new_count} new, {pers_count} persisted)"
+
+              if resolved:
+                  md += f", {len(resolved)} resolved ✅"
+              md += "\n\n"
+
+              md += "| Status | Severity | Category | Issue | Location |\n"
+              md += "|--------|----------|----------|-------|----------|\n"
+
+              for issue in active:
+                  status = "🆕" if issue['status'] == 'new' else "🔄"
+                  sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
+                  sev = sev_map.get(issue['severity'], '⚪')
+
+                  # Truncate description for table
+                  desc = issue['description']
+                  if len(desc) > 60:
+                      desc = desc[:57] + "..."
+
+                  loc = issue['file']
+                  if issue.get('line'):
+                      loc += f":{issue['line']}"
+
+                  md += f"| {status} | {sev} | {issue['category']} | {desc} | {loc} |\n"
+
+              if resolved:
+                  md += "\n### ✅ Recently Resolved\n\n"
+                  for issue in resolved[:5]:  # Show max 5 most recent
+                      loc = issue['file']
+                      if issue.get('line'):
+                          loc += f":{issue['line']}"
+                      desc = issue['description'][:50] + "..." if len(issue['description']) > 50 else issue['description']
+                      md += f"- {desc} ({loc})\n"
+
+          md += f"\n\n<!-- state:{encoded} -->"
+          md += f"\n<!-- sha:{state['review_sha']} -->"
+
+          with open('summary.md', 'w') as f:
+              f.write(md)
+
+          print("Generated markdown summary")
+          PYTHON_SCRIPT
+
+      - name: Post Summary Comment
         if: ${{ steps.review.outcome == 'success' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.initial-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: review_report.md
+          body-path: summary.md
           edit-mode: replace
 
       - name: Post Failure Comment
