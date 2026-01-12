@@ -314,85 +314,49 @@ jobs:
 
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
 
-            // Separate new issues into line-specific and file-level
+            // Filter new issues with line numbers only
             const newLineIssues = state.issues.filter(i =>
               i.status === 'new' && i.line
             );
-            const newFileIssues = state.issues.filter(i =>
-              i.status === 'new' && i.file && !i.line
-            );
 
-            console.log(`Found ${newLineIssues.length} line-specific issues and ${newFileIssues.length} file-level issues`);
+            if (newLineIssues.length === 0) {
+              console.log('No new line-specific issues to comment on');
+              return;
+            }
+
+            console.log(`Creating ${newLineIssues.length} inline comments...`);
 
             const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
+            const comments = newLineIssues.map(issue => ({
+              path: issue.file,
+              line: issue.line,
+              side: 'RIGHT',
+              body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
+            }));
 
-            // Create inline comments for line-specific issues
-            if (newLineIssues.length > 0) {
-              console.log(`Creating ${newLineIssues.length} inline comments...`);
+            try {
+              const review = await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
+                event: 'COMMENT',
+                comments
+              });
 
-              const comments = newLineIssues.map(issue => ({
-                path: issue.file,
-                line: issue.line,
-                side: 'RIGHT',
-                body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
-              }));
+              console.log(`Created review with ${review.data.comments.length} inline comments`);
 
-              try {
-                const review = await github.rest.pulls.createReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
-                  event: 'COMMENT',
-                  comments
-                });
+              // Update state with comment IDs
+              const commentIds = review.data.comments.map(c => c.id);
+              newLineIssues.forEach((issue, i) => {
+                issue.comment_id = commentIds[i];
+              });
 
-                console.log(`Created review with ${review.data.comments.length} inline comments`);
-
-                // Update state with comment IDs
-                const commentIds = review.data.comments.map(c => c.id);
-                newLineIssues.forEach((issue, i) => {
-                  issue.comment_id = commentIds[i];
-                });
-
-                fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-              } catch (error) {
-                console.error('Failed to create inline comments:', error.message);
-                console.error('Error details:', JSON.stringify(error.response?.data || error, null, 2));
-                // Continue anyway - summary comment will still be posted
-              }
-            }
-
-            // Create regular PR comments for file-level issues
-            if (newFileIssues.length > 0) {
-              console.log(`Creating ${newFileIssues.length} file-level comments...`);
-
-              for (const issue of newFileIssues) {
-                try {
-                  const comment = await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: context.issue.number,
-                    body: `${severityEmoji[issue.severity] || '⚪'} **${issue.category}** in [\`${issue.file}\`](${issue.file})\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`
-                  });
-
-                  console.log(`Created file-level comment for ${issue.file}`);
-
-                  // Update state with comment ID
-                  issue.comment_id = comment.data.id;
-                } catch (error) {
-                  console.error(`Failed to create comment for ${issue.file}:`, error.message);
-                }
-              }
-
-              // Save updated state with comment IDs
-              if (newFileIssues.some(i => i.comment_id)) {
-                fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-              }
-            }
-
-            if (newLineIssues.length === 0 && newFileIssues.length === 0) {
-              console.log('No new issues to comment on');
+              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+            } catch (error) {
+              console.error('Failed to create inline comments:', error.message);
+              console.error('Error details:', JSON.stringify(error.response?.data || error, null, 2));
+              // Continue anyway - summary comment will still be posted
             }
 
       - name: Generate Markdown Summary
@@ -428,7 +392,7 @@ jobs:
               md += "|--------|----------|----------|-------|----------|\n"
 
               for issue in active:
-                  status = "🆕" if issue['status'] == 'new' else "🔄"
+                  status = "New" if issue['status'] == 'new' else "Persisted"
                   sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
                   sev = sev_map.get(issue['severity'], '⚪')
 
