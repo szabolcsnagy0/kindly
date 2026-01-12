@@ -111,6 +111,31 @@ Your response MUST be valid JSON wrapped in `<review_output>` tags.
 You may include reasoning or analysis BEFORE the opening tag, but it will be discarded.
 Only the JSON INSIDE the tags will be processed.
 
+**Example with line number:**
+```json
+{
+  "severity": "high",
+  "category": "Security",
+  "description": "SQL injection vulnerability",
+  "suggested_fix": "Use parameterized queries",
+  "file": "backend/service.py",
+  "line": 89
+}
+```
+
+**Example without line number (omit the field entirely):**
+```json
+{
+  "severity": "medium",
+  "category": "Testing",
+  "description": "Missing test coverage",
+  "suggested_fix": "Add unit tests",
+  "file": "backend/router.py"
+}
+```
+
+**Your output format:**
+
 <review_output>
 {
   "summary": "2-3 sentences: what changed and what you verified",
