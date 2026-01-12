@@ -42,13 +42,13 @@ jobs:
           ref: refs/pull/${{ env.GITHUB_PR_NUMBER }}/head
           fetch-depth: 0
 
-      - name: Post Start Comment
-        id: initial-comment
+      - name: Post Running Comment
+        id: running-comment
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            ## 🕵️‍♂️ Claude Review
+            ## ⏳ Claude Review Running
 
             Review started... I am analyzing your changes. [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
@@ -151,14 +151,14 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Post No Changes Comment
+      - name: Update Running Comment - No Changes
         if: ${{ steps.validate.outputs.has_changes == 'false' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
-          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          comment-id: ${{ steps.running-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            ## 🕵️‍♂️ Claude Review
+            ## ✅ Claude Review Complete
 
             No changes detected since the last review.
           edit-mode: replace
@@ -476,6 +476,108 @@ jobs:
               });
             }
 
+      - name: Resolve Inline Comments for Resolved Issues
+        if: ${{ steps.review.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('state.json')) {
+              console.log('No state.json found, skipping comment resolution');
+              return;
+            }
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+
+            // Find resolved issues that have comment IDs
+            const resolvedWithComments = state.issues.filter(i =>
+              i.status === 'resolved' && i.comment_id
+            );
+
+            if (resolvedWithComments.length === 0) {
+              console.log('No resolved issues with comment IDs to resolve');
+              return;
+            }
+
+            console.log(`\n=== RESOLVING ${resolvedWithComments.length} INLINE COMMENTS ===`);
+
+            const results = { success: [], failed: [] };
+
+            // GitHub GraphQL API to resolve review threads
+            for (const issue of resolvedWithComments) {
+              console.log(`\nResolving comment ${issue.comment_id} for ${issue.file}:${issue.line || 'N/A'}...`);
+
+              try {
+                // Get the comment to find its thread ID
+                const comment = await github.rest.pulls.getReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: issue.comment_id
+                });
+
+                // Use GraphQL to resolve the thread
+                const mutation = `
+                  mutation {
+                    resolveReviewThread(input: {threadId: "${comment.data.node_id}"}) {
+                      thread {
+                        isResolved
+                      }
+                    }
+                  }
+                `;
+
+                await github.graphql(mutation);
+                results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
+                console.log(`  ✓ SUCCESS - Resolved thread for comment ${issue.comment_id}`);
+              } catch (error) {
+                results.failed.push({
+                  file: issue.file,
+                  line: issue.line,
+                  commentId: issue.comment_id,
+                  error: error.message
+                });
+                console.error(`  ✗ FAILED - ${error.message}`);
+              }
+            }
+
+            console.log(`\n=== RESOLUTION SUMMARY ===`);
+            console.log(`✓ Successfully resolved: ${results.success.length}/${resolvedWithComments.length} threads`);
+            if (results.failed.length > 0) {
+              console.log(`✗ Failed to resolve: ${results.failed.length} threads`);
+              results.failed.forEach(r => {
+                console.log(`  ✗ ${r.file}:${r.line || 'N/A'} (comment ${r.commentId}): ${r.error}`);
+              });
+            }
+
+      - name: Find or Create Sticky Results Comment
+        if: ${{ steps.review.outcome == 'success' }}
+        id: sticky-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- claude-review-results -->';
+
+            // Find existing sticky comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const stickyComment = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (stickyComment) {
+              console.log(`Found existing sticky comment: ${stickyComment.id}`);
+              core.setOutput('comment_id', stickyComment.id);
+            } else {
+              console.log('No sticky comment found, will create new one');
+              core.setOutput('comment_id', '');
+            }
+
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}
         run: |
@@ -533,7 +635,8 @@ jobs:
                       desc = issue['description'][:50] + "..." if len(issue['description']) > 50 else issue['description']
                       md += f"- {desc} ({loc})\n"
 
-          md += f"\n\n<!-- state:{encoded} -->"
+          md += f"\n\n<!-- claude-review-results -->"
+          md += f"\n<!-- state:{encoded} -->"
           md += f"\n<!-- sha:{state['review_sha']} -->"
 
           with open('summary.md', 'w') as f:
@@ -542,23 +645,39 @@ jobs:
           print("Generated markdown summary")
           PYTHON_SCRIPT
 
-      - name: Post Summary Comment
+      - name: Post Sticky Results Comment
         if: ${{ steps.review.outcome == 'success' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
-          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          comment-id: ${{ steps.sticky-comment.outputs.comment_id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body-path: summary.md
           edit-mode: replace
 
-      - name: Post Failure Comment
+      - name: Update Running Comment - Success
+        if: ${{ steps.review.outcome == 'success' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.running-comment.outputs.comment-id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body: |
+            ## ✅ Claude Review Complete
+
+            Review finished successfully! See the results in the pinned comment below.
+
+            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          edit-mode: replace
+
+      - name: Update Running Comment - Failure
         if: ${{ steps.review.outcome == 'failure' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
-          comment-id: ${{ steps.initial-comment.outputs.comment-id }}
+          comment-id: ${{ steps.running-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            :x: Claude review failed to complete.
+            ## ❌ Claude Review Failed
+
+            The review failed to complete. Please check the workflow run for details.
 
             [View workflow run for details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           edit-mode: replace
