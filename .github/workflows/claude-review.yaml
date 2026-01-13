@@ -440,6 +440,8 @@ jobs:
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}
         run: npx tsx .github/scripts/generate-summary.ts
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
       - name: Post Results Comment (First Run)
         if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'false' }}
