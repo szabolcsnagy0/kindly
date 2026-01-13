@@ -553,7 +553,7 @@ jobs:
 
             const ignoredIssueNumbers = new Set();
 
-            // PATH A: Scan PR comments for "claude-review ignore [numbers]"
+            // PATH A: Scan PR comments for "claude-ignore [numbers]"
             console.log('\n--- Scanning PR-level comments ---');
             const allComments = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -562,7 +562,7 @@ jobs:
             });
 
             for (const comment of allComments.data) {
-              const match = comment.body.match(/claude-review\s+ignore\s+([\d,\s]+)/i);
+              const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
               if (match) {
                 const numbers = match[1]
                   .split(/[,\s]+/)
@@ -574,7 +574,7 @@ jobs:
               }
             }
 
-            // PATH B: Scan inline review threads for "claude-review ignore"
+            // PATH B: Scan inline review threads for "claude-ignore"
             console.log('\n--- Scanning inline review threads ---');
 
             try {
@@ -609,7 +609,7 @@ jobs:
 
               for (const thread of threads) {
                 const hasIgnoreCommand = thread.comments.nodes.some(c =>
-                  c.body.toLowerCase().includes('claude-review ignore')
+                  c.body.toLowerCase().includes('claude-ignore')
                 );
 
                 if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
