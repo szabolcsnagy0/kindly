@@ -272,44 +272,44 @@ jobs:
             );
             const ignoredIssues = state.issues.filter(i => i.status === 'ignored');
 
-            let context = '';
+            let reviewContext = '';
 
             if (activeIssues.length > 0) {
-              context += '### Active Issues to Re-evaluate\n\n';
+              reviewContext += '### Active Issues to Re-evaluate\n\n';
               for (const issue of activeIssues) {
-                context += `**Issue #${issue.issue_number}** (${issue.status ?? 'unknown'})\n`;
-                context += `- **Category**: ${issue.category}\n`;
-                context += `- **Severity**: ${issue.severity ?? 'not specified'}\n`;
-                context += `- **Description**: ${issue.description}\n`;
+                reviewContext += `**Issue #${issue.issue_number}** (${issue.status ?? 'unknown'})\n`;
+                reviewContext += `- **Category**: ${issue.category}\n`;
+                reviewContext += `- **Severity**: ${issue.severity ?? 'not specified'}\n`;
+                reviewContext += `- **Description**: ${issue.description}\n`;
                 if (issue.file) {
-                  context += `- **Location**: ${issue.file}`;
-                  if (issue.line) context += `:${issue.line}`;
-                  context += '\n';
+                  reviewContext += `- **Location**: ${issue.file}`;
+                  if (issue.line) reviewContext += `:${issue.line}`;
+                  reviewContext += '\n';
                 }
-                context += '\n';
+                reviewContext += '\n';
               }
             }
 
             if (ignoredIssues.length > 0) {
-              context += '### Ignored Issues (for context only)\n\n';
+              reviewContext += '### Ignored Issues (for context only)\n\n';
               for (const issue of ignoredIssues) {
-                context += `**Issue #${issue.issue_number}** (status: "ignored")\n`;
-                context += `- **Category**: ${issue.category}\n`;
-                context += `- **Description**: ${issue.description}\n`;
+                reviewContext += `**Issue #${issue.issue_number}** (status: "ignored")\n`;
+                reviewContext += `- **Category**: ${issue.category}\n`;
+                reviewContext += `- **Description**: ${issue.description}\n`;
                 if (issue.file) {
-                  context += `- **Location**: ${issue.file}`;
-                  if (issue.line) context += `:${issue.line}`;
-                  context += '\n';
+                  reviewContext += `- **Location**: ${issue.file}`;
+                  if (issue.line) reviewContext += `:${issue.line}`;
+                  reviewContext += '\n';
                 }
-                context += '\n';
+                reviewContext += '\n';
               }
             }
 
-            if (context === '') {
-              context = 'No previous issues found.';
+            if (reviewContext === '') {
+              reviewContext = 'No previous issues found.';
             }
 
-            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', context);
+            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', reviewContext);
             console.log('Prepared review context with ' + activeIssues.length + ' active and ' + ignoredIssues.length + ' ignored issues');
 
       - name: Determine Review Mode & Diff Base

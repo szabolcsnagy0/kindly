@@ -14,12 +14,13 @@ Your goal is **One-Shot Completeness**: Find ALL blocking issues in this pass so
 ${PREVIOUS_REVIEW_CONTEXT}
 
 **How to handle previous issues:**
-- Previous issues are listed with their `issue_number`
-- Re-evaluate each one based on the current code changes:
+- Active issues are listed with their `issue_number` under "Active Issues to Re-evaluate"
+- Ignored issues are listed under "Ignored Issues (for context only)"
+- Re-evaluate each **active** issue based on the current code changes:
   - If the issue is **fixed**: Add its `issue_number` to the `resolved_issue_numbers` array
   - If the issue **still exists**: Add its `issue_number` to the `persisted_issue_numbers` array
   - If you don't see the file/context for the issue: **Do not include its number** (it will be carried forward automatically)
-- Issues with `status: "ignored"` are shown for context only - **do not report them in any array**
+- **NEVER** include ignored issues in any array - they are shown for context only
 - New issues you find should go in the `new_issues` array with full details (no `issue_number` needed)
 
 ## Pre-Loaded Context
@@ -76,9 +77,10 @@ You MUST do the following before reporting any issue:
    - **If tests are missing, inadequate, or incorrect, this is a BLOCKING issue**
 
 7. **Re-evaluate Previous Issues:**
-   - For each issue in the Previous Review Context, determine if it's now resolved
-   - Return resolved issues with `status: "resolved"` so they can be closed
-   - Return persisting issues with `status: "persisted"` to keep them open
+   - For each active issue in the Previous Review Context, determine if it's now resolved
+   - Add resolved issue numbers to `resolved_issue_numbers` array
+   - Add persisting issue numbers to `persisted_issue_numbers` array
+   - Never include ignored issues in any array
 
 ## Final-State Verification Rule (MANDATORY)
 
@@ -143,8 +145,8 @@ Only the JSON INSIDE the tags will be processed.
 
 **Field Explanations:**
 - `new_issues`: Array of newly discovered issues with full details (no `issue_number` or `status` field needed)
-- `persisted_issue_numbers`: Array of issue numbers from Previous Review Context that still exist
-- `resolved_issue_numbers`: Array of issue numbers from Previous Review Context that are now fixed
+- `persisted_issue_numbers`: Array of **active** issue numbers that still exist (never include ignored issues)
+- `resolved_issue_numbers`: Array of **active** issue numbers that are now fixed (never include ignored issues)
 - For new issues, omit `line` field for file-level or architectural issues
 - Empty arrays are allowed (e.g., `"new_issues": []` means no new issues found)
 
