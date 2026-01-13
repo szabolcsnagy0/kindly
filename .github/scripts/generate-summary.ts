@@ -2,24 +2,21 @@
 
 import { readFileSync, writeFileSync } from "fs";
 
-interface ProcessedIssue {
-  id: string;
-  issue_number: number;
-  status: "new" | "persisted" | "resolved";
+interface Issue {
+  issue_number?: number;
+  status?: "new" | "persisted" | "resolved" | "ignored";
   severity?: string;
   category: string;
   description: string;
   file?: string;
   line?: number;
   comment_id?: number;
-  ignored: boolean;
-  ignored_at?: string | null;
 }
 
 interface State {
   review_sha: string;
   summary: string;
-  issues: ProcessedIssue[];
+  issues: Issue[];
 }
 
 const SEVERITY_EMOJI: Record<string, string> = {
@@ -29,7 +26,7 @@ const SEVERITY_EMOJI: Record<string, string> = {
 };
 
 function formatLocation(
-  issue: ProcessedIssue,
+  issue: Issue,
   githubRepo: string,
   prNumber: string
 ): string {
@@ -49,7 +46,7 @@ function formatLocation(
 }
 
 function generateIssueTable(
-  issues: ProcessedIssue[],
+  issues: Issue[],
   githubRepo: string,
   prNumber: string
 ): string {
@@ -82,9 +79,9 @@ function main() {
     const encoded = readFileSync("state_encoded.txt", "utf-8");
 
     const active = state.issues.filter(
-      (i) => i.status !== "resolved" && !i.ignored
+      (i) => i.status !== "resolved" && i.status !== "ignored"
     );
-    const ignored = state.issues.filter((i) => i.ignored);
+    const ignored = state.issues.filter((i) => i.status === "ignored");
     const resolved = state.issues.filter((i) => i.status === "resolved");
 
     let md = "## 🕵️‍♂️ Claude Review\n\n";

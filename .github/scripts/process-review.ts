@@ -1,57 +1,47 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "fs";
-import { createHash } from "crypto";
 import { gzip } from "zlib";
 import { promisify } from "util";
 
 const gzipAsync = promisify(gzip);
 
 interface Issue {
+  issue_number?: number;
+  status?: "new" | "persisted" | "resolved" | "ignored";
   category: string;
   description: string;
   suggested_fix: string;
   file?: string;
   line?: number;
   severity?: string;
+  comment_id?: number;
 }
 
 interface ReviewOutput {
   summary: string;
-  issues: Issue[];
-}
-
-interface ProcessedIssue extends Issue {
-  id: string;
-  issue_number: number;
-  status: "new" | "persisted" | "resolved";
-  comment_id?: number | null;
-  ignored: boolean;
-  ignored_at?: string | null;
+  new_issues: Issue[];
+  persisted_issue_numbers: number[];
+  resolved_issue_numbers: number[];
 }
 
 interface State {
   review_sha: string;
   summary: string;
   max_issue_number: number;
-  issues: ProcessedIssue[];
-}
-
-function generateIssueId(issue: Issue): string {
-  const file = issue.file ?? "";
-  const line = issue.line ?? 0;
-  const category = issue.category ?? "";
-  const description = issue.description ?? "";
-
-  const content = `${file.toLowerCase()}::${line}::${category.toLowerCase()}::${description
-    .toLowerCase()
-    .trim()
-    .substring(0, 100)}`;
-  return createHash("sha256").update(content).digest("hex").substring(0, 16);
+  issues: Issue[];
 }
 
 async function main() {
   try {
+    const currentSha = process.env.HEAD_SHA;
+    const reviewMode = process.env.REVIEW_MODE ?? "FULL";
+
+    if (!currentSha) {
+      console.error("ERROR: HEAD_SHA environment variable not set");
+      process.exit(1);
+    }
+
     // Load Claude's output
     const content = readFileSync("review_output.txt", "utf-8");
     const startTag = "<review_output>";
@@ -67,74 +57,97 @@ async function main() {
     const reviewJson = content.substring(start + startTag.length, end);
     const review: ReviewOutput = JSON.parse(reviewJson);
 
-    // Load previous state
-    const prevStateJson = process.env.PREVIOUS_STATE ?? "{}";
-    const prevState: Partial<State> = JSON.parse(prevStateJson);
-    const currentSha = process.env.HEAD_SHA;
-
-    if (!currentSha) {
-      console.error("ERROR: HEAD_SHA environment variable not set");
+    // Validate review output
+    if (
+      !review.summary ||
+      !Array.isArray(review.new_issues) ||
+      !Array.isArray(review.persisted_issue_numbers) ||
+      !Array.isArray(review.resolved_issue_numbers)
+    ) {
+      console.error("ERROR: Invalid review output structure");
       process.exit(1);
     }
 
-    // Build previous issues map
-    const prevById = new Map<string, ProcessedIssue>();
+    // Load previous state
+    const prevStateJson = process.env.PREVIOUS_STATE ?? "{}";
+    const prevState: Partial<State> = JSON.parse(prevStateJson);
+    let maxIssueNumber = prevState.max_issue_number ?? 0;
+
+    // Build map of previous issues by number
+    const prevIssuesByNumber = new Map<number, Issue>();
     for (const issue of prevState.issues ?? []) {
-      prevById.set(issue.id, issue);
+      if (issue.issue_number) {
+        prevIssuesByNumber.set(issue.issue_number, issue);
+      }
     }
 
-    let maxIssueNumber = prevState.max_issue_number ?? 0;
-    const newIssues: ProcessedIssue[] = [];
+    const processedIssues: Issue[] = [];
+    const reviewedIssueNumbers = new Set<number>();
 
-    // Process current issues
-    for (const issue of review.issues ?? []) {
-      // Validate required fields
+    // Process new issues
+    for (const issue of review.new_issues) {
       if (!issue.category || !issue.description || !issue.suggested_fix) {
-        console.log(`WARNING: Skipping malformed issue:`, issue);
+        console.log("WARNING: Skipping malformed new issue:", issue);
         continue;
       }
 
-      // Ensure file field exists
-      if (!issue.file) {
-        issue.file = "";
-      }
-
-      const issueId = generateIssueId(issue);
-      const prev = prevById.get(issueId);
-
-      // Get or assign issue number
-      let issueNumber: number;
-      if (prev?.issue_number) {
-        issueNumber = prev.issue_number;
-      } else {
-        maxIssueNumber++;
-        issueNumber = maxIssueNumber;
-      }
-
-      newIssues.push({
-        id: issueId,
-        issue_number: issueNumber,
-        status: prev ? "persisted" : "new",
-        comment_id: prev?.comment_id ?? null,
-        ignored: prev?.ignored ?? false,
-        ignored_at: prev?.ignored_at ?? null,
+      maxIssueNumber++;
+      processedIssues.push({
         ...issue,
+        issue_number: maxIssueNumber,
+        status: "new",
       });
-
-      prevById.delete(issueId);
     }
 
-    // Remaining previous issues are resolved
-    for (const prev of prevById.values()) {
-      newIssues.push({ ...prev, status: "resolved" });
+    // Process persisted issues
+    for (const issueNumber of review.persisted_issue_numbers) {
+      const prevIssue = prevIssuesByNumber.get(issueNumber);
+      if (!prevIssue) {
+        console.log(`WARNING: Persisted issue #${issueNumber} not found in previous state`);
+        continue;
+      }
+
+      processedIssues.push({
+        ...prevIssue,
+        status: "persisted",
+      });
+      reviewedIssueNumbers.add(issueNumber);
     }
 
-    // Create state
+    // Process resolved issues
+    for (const issueNumber of review.resolved_issue_numbers) {
+      const prevIssue = prevIssuesByNumber.get(issueNumber);
+      if (!prevIssue) {
+        console.log(`WARNING: Resolved issue #${issueNumber} not found in previous state`);
+        continue;
+      }
+
+      processedIssues.push({
+        ...prevIssue,
+        status: "resolved",
+      });
+      reviewedIssueNumbers.add(issueNumber);
+    }
+
+    // In INCREMENTAL mode, carry forward issues that weren't reviewed
+    if (reviewMode === "INCREMENTAL") {
+      for (const prevIssue of prevState.issues ?? []) {
+        if (
+          prevIssue.issue_number &&
+          !reviewedIssueNumbers.has(prevIssue.issue_number)
+        ) {
+          // Issue wasn't in review scope - carry forward unchanged
+          processedIssues.push(prevIssue);
+        }
+      }
+    }
+
+    // Create new state
     const state: State = {
       review_sha: currentSha,
-      summary: review.summary ?? "Review completed",
+      summary: review.summary,
       max_issue_number: maxIssueNumber,
-      issues: newIssues,
+      issues: processedIssues,
     };
 
     // Save state
@@ -146,18 +159,29 @@ async function main() {
     writeFileSync("state_encoded.txt", encoded);
 
     // Print summary
-    const newCount = newIssues.filter((i) => i.status === "new").length;
-    const persistedCount = newIssues.filter(
-      (i) => i.status === "persisted"
-    ).length;
-    const resolvedCount = newIssues.filter(
-      (i) => i.status === "resolved"
-    ).length;
+    const statusCounts = {
+      new: 0,
+      persisted: 0,
+      resolved: 0,
+      ignored: 0,
+    };
 
-    console.log(`Processed ${review.issues?.length ?? 0} current issues`);
-    console.log(`Found ${newCount} new issues`);
-    console.log(`Found ${persistedCount} persisted issues`);
-    console.log(`Found ${resolvedCount} resolved issues`);
+    for (const issue of processedIssues) {
+      if (issue.status) {
+        statusCounts[issue.status]++;
+      }
+    }
+
+    console.log(`Review mode: ${reviewMode}`);
+    console.log(`Received from Claude:`);
+    console.log(`  New issues: ${review.new_issues.length}`);
+    console.log(`  Persisted: ${review.persisted_issue_numbers.length}`);
+    console.log(`  Resolved: ${review.resolved_issue_numbers.length}`);
+    console.log(`Total issues in state: ${processedIssues.length}`);
+    console.log(`  New: ${statusCounts.new}`);
+    console.log(`  Persisted: ${statusCounts.persisted}`);
+    console.log(`  Resolved: ${statusCounts.resolved}`);
+    console.log(`  Ignored: ${statusCounts.ignored}`);
   } catch (error) {
     console.error(
       "ERROR:",

@@ -122,6 +122,196 @@ jobs:
               core.setOutput('previous_sha', '');
             }
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install -g tsx
+
+      - name: Write Previous State to File
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const state = ${{ steps.get-state.outputs.state }};
+            fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+            console.log(`Wrote state with ${state.issues?.length ?? 0} issues`);
+
+      - name: Detect Ignore Commands
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('state.json')) {
+              console.log('No state.json found, skipping ignore detection');
+              return;
+            }
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+            console.log(`Checking for ignore commands (${state.issues?.length ?? 0} issues)`);
+
+            const ignoredIssueNumbers = new Set();
+
+            // Scan PR comments for "claude-ignore [numbers]"
+            const allComments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            for (const comment of allComments.data) {
+              const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
+              if (match) {
+                const numbers = match[1]
+                  .split(/[,\s]+/)
+                  .map(n => parseInt(n.trim()))
+                  .filter(n => !isNaN(n));
+
+                console.log(`Found ignore command in comment: ${numbers.join(', ')}`);
+                numbers.forEach(num => ignoredIssueNumbers.add(num));
+              }
+            }
+
+            // Scan inline review threads for "claude-ignore"
+            try {
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+
+              const queryData = await github.graphql(`
+                query($prNodeId: ID!) {
+                  node(id: $prNodeId) {
+                    ... on PullRequest {
+                      reviewThreads(last: 100) {
+                        nodes {
+                          id
+                          comments(last: 50) {
+                            nodes {
+                              id
+                              body
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { prNodeId: pr.data.node_id });
+
+              const threads = queryData?.node?.reviewThreads?.nodes ?? [];
+
+              for (const thread of threads) {
+                const hasIgnoreCommand = thread.comments.nodes.some(c =>
+                  c.body.toLowerCase().includes('claude-ignore')
+                );
+
+                if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
+                  const firstComment = thread.comments.nodes[0];
+
+                  // Try to find issue by issue_number marker
+                  const issueNumMatch = firstComment.body.match(/<!-- issue_number:(\d+) -->/);
+                  if (issueNumMatch) {
+                    const issueNum = parseInt(issueNumMatch[1]);
+                    console.log(`Thread has ignore for issue #${issueNum}`);
+                    ignoredIssueNumbers.add(issueNum);
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Failed to scan review threads: ${error.message}`);
+            }
+
+            // Apply ignore status
+            if (!state.issues) state.issues = [];
+            const validIssueNumbers = state.issues.map(i => i.issue_number).filter(n => n);
+            const validIgnored = Array.from(ignoredIssueNumbers).filter(n => validIssueNumbers.includes(n));
+
+            if (validIgnored.length > 0) {
+              console.log(`Marking issues as ignored: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
+
+              for (const issue of state.issues) {
+                if (validIgnored.includes(issue.issue_number)) {
+                  issue.status = 'ignored';
+                }
+              }
+
+              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+              console.log('Updated state with ignored issues');
+            } else {
+              console.log('No new ignored issues found');
+            }
+
+      - name: Prepare Review Context
+        id: prepare-context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('state.json')) {
+              core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous review found.');
+              return;
+            }
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+
+            if (!state.issues || state.issues.length === 0) {
+              core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous issues found.');
+              return;
+            }
+
+            // Group issues by status
+            const activeIssues = state.issues.filter(i =>
+              i.status !== 'resolved' && i.status !== 'ignored'
+            );
+            const ignoredIssues = state.issues.filter(i => i.status === 'ignored');
+
+            let context = '';
+
+            if (activeIssues.length > 0) {
+              context += '### Active Issues to Re-evaluate\n\n';
+              for (const issue of activeIssues) {
+                context += `**Issue #${issue.issue_number}** (${issue.status ?? 'unknown'})\n`;
+                context += `- **Category**: ${issue.category}\n`;
+                context += `- **Severity**: ${issue.severity ?? 'not specified'}\n`;
+                context += `- **Description**: ${issue.description}\n`;
+                if (issue.file) {
+                  context += `- **Location**: ${issue.file}`;
+                  if (issue.line) context += `:${issue.line}`;
+                  context += '\n';
+                }
+                context += '\n';
+              }
+            }
+
+            if (ignoredIssues.length > 0) {
+              context += '### Ignored Issues (for context only)\n\n';
+              for (const issue of ignoredIssues) {
+                context += `**Issue #${issue.issue_number}** (status: "ignored")\n`;
+                context += `- **Category**: ${issue.category}\n`;
+                context += `- **Description**: ${issue.description}\n`;
+                if (issue.file) {
+                  context += `- **Location**: ${issue.file}`;
+                  if (issue.line) context += `:${issue.line}`;
+                  context += '\n';
+                }
+                context += '\n';
+              }
+            }
+
+            if (context === '') {
+              context = 'No previous issues found.';
+            }
+
+            core.exportVariable('PREVIOUS_REVIEW_CONTEXT', context);
+            console.log('Prepared review context with ' + activeIssues.length + ' active and ' + ignoredIssues.length + ' ignored issues');
+
       - name: Determine Review Mode & Diff Base
         id: determine-mode
         run: |
@@ -151,16 +341,70 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update Running Comment - No Changes
+      - name: Generate Summary (No Changes)
         if: ${{ steps.validate.outputs.has_changes == 'false' }}
+        run: npx tsx .github/scripts/generate-summary.ts
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Find Results Comment (No Changes)
+        if: ${{ steps.validate.outputs.has_changes == 'false' }}
+        id: find-results-comment-no-changes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- claude-review-results -->';
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const resultsComment = comments.data.find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (resultsComment) {
+              console.log(`Found existing results comment: ${resultsComment.id}`);
+              core.setOutput('exists', 'true');
+              core.setOutput('comment_id', resultsComment.id);
+            } else {
+              console.log('No results comment found');
+              core.setOutput('exists', 'false');
+              core.setOutput('comment_id', '');
+            }
+
+      - name: Update Comment (No Changes - First Run)
+        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'false' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.running-comment.outputs.comment-id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body-path: summary.md
+          edit-mode: replace
+
+      - name: Update Results Comment (No Changes - Subsequent)
+        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'true' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-results-comment-no-changes.outputs.comment_id }}
+          issue-number: ${{ env.GITHUB_PR_NUMBER }}
+          body-path: summary.md
+          edit-mode: replace
+
+      - name: Update Running Comment (No Changes - Subsequent)
+        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'true' }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.running-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
-            ## ✅ Claude Review Complete
+            ## ✅ Review Updated
 
-            No changes detected since the last review.
+            No changes detected since the last review, but ignored issues have been updated.
+
+            See the [results comment](https://github.com/${{ github.repository }}/pull/${{ env.GITHUB_PR_NUMBER }}#issuecomment-${{ steps.find-results-comment-no-changes.outputs.comment_id }}).
           edit-mode: replace
 
       - name: Prepare Changed Files
@@ -190,16 +434,9 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Node.js
+      - name: Install Claude Code
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Dependencies
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        run: |
-          npm install -g @anthropic-ai/claude-code tsx
+        run: npm install -g @anthropic-ai/claude-code
 
       - name: Run Claude Review
         id: review
@@ -220,6 +457,7 @@ jobs:
         env:
           PREVIOUS_STATE: ${{ steps.get-state.outputs.state }}
           HEAD_SHA: ${{ steps.get-pr-details.outputs.head_sha }}
+          REVIEW_MODE: ${{ env.REVIEW_MODE }}
 
       - name: Create Inline Comments
         if: ${{ steps.review.outcome == 'success' }}
@@ -238,7 +476,6 @@ jobs:
 
             const newLineIssues = state.issues.filter(i => {
               if (i.status !== 'new' || !i.line || !i.file) return false;
-              if (i.ignored) return false;
               return fs.existsSync(i.file);
             });
 
@@ -268,7 +505,7 @@ jobs:
             let successCount = 0;
 
             for (const issue of validatedIssues) {
-              const body = `${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`;
+              const body = `${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue_number:${issue.issue_number} -->`;
 
               try {
                 const response = await github.rest.pulls.createReviewComment({
@@ -335,117 +572,6 @@ jobs:
             fs.writeFileSync('state_encoded.txt', encoded);
 
             console.log('Re-encoded state with comment IDs');
-
-      - name: Detect Ignore Commands
-        if: ${{ steps.review.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-
-            if (!fs.existsSync('state.json')) {
-              console.log('No state.json found, skipping ignore detection');
-              return;
-            }
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            console.log(`Checking for ignore commands (${state.issues.length} issues)`);
-
-            const ignoredIssueNumbers = new Set();
-
-            // Scan PR comments for "claude-ignore [numbers]"
-            const allComments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            for (const comment of allComments.data) {
-              const match = comment.body.match(/claude-review\s+ignore\s+([\d,\s]+)/i);
-              if (match) {
-                const numbers = match[1]
-                  .split(/[,\s]+/)
-                  .map(n => parseInt(n.trim()))
-                  .filter(n => !isNaN(n));
-
-                console.log(`Found ignore command: ${numbers.join(', ')}`);
-                numbers.forEach(num => ignoredIssueNumbers.add(num));
-              }
-            }
-
-            // Scan inline review threads for "claude-ignore"
-            try {
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-
-              const queryData = await github.graphql(`
-                query($prNodeId: ID!) {
-                  node(id: $prNodeId) {
-                    ... on PullRequest {
-                      reviewThreads(last: 100) {
-                        nodes {
-                          id
-                          comments(last: 50) {
-                            nodes {
-                              id
-                              body
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { prNodeId: pr.data.node_id });
-
-              const threads = queryData?.node?.reviewThreads?.nodes || [];
-
-              for (const thread of threads) {
-                const hasIgnoreCommand = thread.comments.nodes.some(c =>
-                  c.body.toLowerCase().includes('claude-review ignore')
-                );
-
-                if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
-                  const firstComment = thread.comments.nodes[0];
-                  const issueIdMatch = firstComment.body.match(/<!-- issue:(\w+) -->/);
-
-                  if (issueIdMatch) {
-                    const issueId = issueIdMatch[1];
-                    const issue = state.issues.find(i => i.id === issueId);
-
-                    if (issue?.issue_number) {
-                      console.log(`Thread has ignore for issue #${issue.issue_number}`);
-                      ignoredIssueNumbers.add(issue.issue_number);
-                    }
-                  }
-                }
-              }
-            } catch (error) {
-              console.error(`Failed to scan review threads: ${error.message}`);
-            }
-
-            // Apply ignore flags
-            const validIssueNumbers = state.issues.map(i => i.issue_number);
-            const validIgnored = Array.from(ignoredIssueNumbers).filter(n => validIssueNumbers.includes(n));
-
-            if (validIgnored.length > 0) {
-              console.log(`Ignoring issues: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
-
-              const timestamp = new Date().toISOString();
-
-              for (const issue of state.issues) {
-                if (validIgnored.includes(issue.issue_number) && !issue.ignored) {
-                  issue.ignored = true;
-                  issue.ignored_at = timestamp;
-                }
-              }
-
-              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-            }
 
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}

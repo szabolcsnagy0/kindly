@@ -10,7 +10,17 @@ Review the changes in this Pull Request.
 Your goal is **One-Shot Completeness**: Find ALL blocking issues in this pass so the developer does not need multiple rounds of reviews.
 
 ## Previous Review Context
+
 ${PREVIOUS_REVIEW_CONTEXT}
+
+**How to handle previous issues:**
+- Previous issues are listed with their `issue_number`
+- Re-evaluate each one based on the current code changes:
+  - If the issue is **fixed**: Add its `issue_number` to the `resolved_issue_numbers` array
+  - If the issue **still exists**: Add its `issue_number` to the `persisted_issue_numbers` array
+  - If you don't see the file/context for the issue: **Do not include its number** (it will be carried forward automatically)
+- Issues with `status: "ignored"` are shown for context only - **do not report them in any array**
+- New issues you find should go in the `new_issues` array with full details (no `issue_number` needed)
 
 ## Pre-Loaded Context
 
@@ -65,10 +75,10 @@ You MUST do the following before reporting any issue:
    - Verify tests are isolated with proper setup/teardown
    - **If tests are missing, inadequate, or incorrect, this is a BLOCKING issue**
 
-7. **Verify Fixes (If Context Provided):**
-   - Check if issues from `Previous Review Context` have been resolved
-   - If fixed, do NOT report them again
-   - If partially fixed, report the specific gap
+7. **Re-evaluate Previous Issues:**
+   - For each issue in the Previous Review Context, determine if it's now resolved
+   - Return resolved issues with `status: "resolved"` so they can be closed
+   - Return persisting issues with `status: "persisted"` to keep them open
 
 ## Final-State Verification Rule (MANDATORY)
 
@@ -111,35 +121,12 @@ Your response MUST be valid JSON wrapped in `<review_output>` tags.
 You may include reasoning or analysis BEFORE the opening tag, but it will be discarded.
 Only the JSON INSIDE the tags will be processed.
 
-**Example with line number:**
-```json
-{
-  "severity": "high",
-  "category": "Security",
-  "description": "SQL injection vulnerability",
-  "suggested_fix": "Use parameterized queries",
-  "file": "backend/service.py",
-  "line": 89
-}
-```
-
-**Example without line number (omit the field entirely):**
-```json
-{
-  "severity": "medium",
-  "category": "Testing",
-  "description": "Missing test coverage",
-  "suggested_fix": "Add unit tests",
-  "file": "backend/router.py"
-}
-```
-
 **Your output format:**
 
 <review_output>
 {
   "summary": "2-3 sentences: what changed and what you verified",
-  "issues": [
+  "new_issues": [
     {
       "severity": "high" | "medium" | "low",
       "category": "Security" | "Correctness" | "Performance" | "Testing" | "Architecture" | "Code Quality",
@@ -148,9 +135,18 @@ Only the JSON INSIDE the tags will be processed.
       "file": "path/to/file.ts",
       "line": 42
     }
-  ]
+  ],
+  "persisted_issue_numbers": [1, 3, 5],
+  "resolved_issue_numbers": [2, 4]
 }
 </review_output>
+
+**Field Explanations:**
+- `new_issues`: Array of newly discovered issues with full details (no `issue_number` or `status` field needed)
+- `persisted_issue_numbers`: Array of issue numbers from Previous Review Context that still exist
+- `resolved_issue_numbers`: Array of issue numbers from Previous Review Context that are now fixed
+- For new issues, omit `line` field for file-level or architectural issues
+- Empty arrays are allowed (e.g., `"new_issues": []` means no new issues found)
 
 ### Output Rules (MANDATORY)
 
