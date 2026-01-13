@@ -180,17 +180,15 @@ jobs:
           git --no-pager diff ${{ env.DIFF_BASE }}...HEAD > unified_diff.txt
 
           FILE_COUNT=$(git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD | wc -l)
-          echo "Prepared $FILE_COUNT changed files"
+          echo "Prepared $FILE_COUNT changed files for review"
 
-          # DEBUG: Show prepared context
-          echo ""
-          echo "DEBUG: Changed files ($FILE_COUNT):"
-          git --no-pager diff --name-only ${{ env.DIFF_BASE }}...HEAD
-          echo ""
-          echo "DEBUG: Unified diff (first 100 lines):"
-          head -100 unified_diff.txt
-          echo ""
-          echo "DEBUG: Total diff lines: $(wc -l < unified_diff.txt)"
+      - name: Validate API Key
+        if: ${{ steps.validate.outputs.has_changes == 'true' }}
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "ERROR: ANTHROPIC_API_KEY secret is not set"
+            exit 1
+          fi
 
       - name: Setup Node.js
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
@@ -198,15 +196,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Claude Code
+      - name: Install Dependencies
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Setup Python
-        if: ${{ steps.validate.outputs.has_changes == 'true' }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        run: |
+          npm install -g @anthropic-ai/claude-code tsx
 
       - name: Run Claude Review
         id: review
@@ -223,100 +216,7 @@ jobs:
 
       - name: Process Review
         if: ${{ steps.review.outcome == 'success' }}
-        run: |
-          python3 <<'PYTHON_SCRIPT'
-          import json
-          import gzip
-          import base64
-          import hashlib
-          import os
-
-          # Load Claude's output
-          with open('review_output.txt', 'r') as f:
-              content = f.read()
-              start = content.find('<review_output>')
-              end = content.find('</review_output>')
-              if start == -1 or end == -1:
-                  print("ERROR: No valid <review_output> tags found")
-                  exit(1)
-              review = json.loads(content[start+15:end])
-
-          # Load previous state from environment
-          prev_state = json.loads(os.getenv('PREVIOUS_STATE', '{}'))
-          current_sha = os.getenv('HEAD_SHA')
-
-          # Generate issue IDs
-          def generate_id(issue):
-              file = issue.get('file', '')
-              line = issue.get('line', 0)
-              category = issue.get('category', '')
-              description = issue.get('description', '')
-              content = f"{file.lower()}::{line}::{category.lower()}::{description.lower().strip()[:100]}"
-              return hashlib.sha256(content.encode()).hexdigest()[:16]
-
-          # Match issues against previous state
-          prev_by_id = {i['id']: i for i in prev_state.get('issues', [])}
-          max_issue_number = prev_state.get('max_issue_number', 0)
-          new_issues = []
-
-          for issue in review.get('issues', []):
-              # Validate required fields
-              if 'category' not in issue or 'description' not in issue or 'suggested_fix' not in issue:
-                  print(f"WARNING: Skipping malformed issue: {issue}")
-                  continue
-
-              # Ensure file field exists (default to empty string for general issues)
-              if 'file' not in issue:
-                  issue['file'] = ''
-
-              issue_id = generate_id(issue)
-              prev = prev_by_id.get(issue_id)
-
-              # Get or assign issue number
-              if prev and 'issue_number' in prev:
-                  issue_number = prev['issue_number']
-              else:
-                  max_issue_number += 1
-                  issue_number = max_issue_number
-
-              new_issues.append({
-                  'id': issue_id,
-                  'issue_number': issue_number,
-                  'status': 'persisted' if prev else 'new',
-                  'comment_id': prev.get('comment_id') if prev else None,
-                  'ignored': prev.get('ignored', False) if prev else False,
-                  'ignored_at': prev.get('ignored_at') if prev else None,
-                  **issue
-              })
-              prev_by_id.pop(issue_id, None)
-
-          # Remaining prev issues are resolved
-          for prev in prev_by_id.values():
-              new_issues.append({**prev, 'status': 'resolved'})
-
-          # Create state
-          state = {
-              'review_sha': current_sha,
-              'summary': review.get('summary', 'Review completed'),
-              'max_issue_number': max_issue_number,
-              'issues': new_issues
-          }
-
-          # Save state
-          with open('state.json', 'w') as f:
-              json.dump(state, f, indent=2)
-
-          # Save compressed state for comment
-          compressed = gzip.compress(json.dumps(state).encode())
-          encoded = base64.b64encode(compressed).decode()
-          with open('state_encoded.txt', 'w') as f:
-              f.write(encoded)
-
-          print(f"Processed {len(review.get('issues', []))} current issues")
-          print(f"Found {sum(1 for i in new_issues if i['status'] == 'new')} new issues")
-          print(f"Found {sum(1 for i in new_issues if i['status'] == 'persisted')} persisted issues")
-          print(f"Found {sum(1 for i in new_issues if i['status'] == 'resolved')} resolved issues")
-          PYTHON_SCRIPT
+        run: npx tsx .github/scripts/process-review.ts
         env:
           PREVIOUS_STATE: ${{ steps.get-state.outputs.state }}
           HEAD_SHA: ${{ steps.get-pr-details.outputs.head_sha }}
@@ -336,11 +236,9 @@ jobs:
 
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
 
-            // Filter new issues with line numbers and files
             const newLineIssues = state.issues.filter(i => {
               if (i.status !== 'new' || !i.line || !i.file) return false;
-              if (i.ignored) return false;  // Skip ignored issues
-              // Only comment on files that exist in the checkout
+              if (i.ignored) return false;
               return fs.existsSync(i.file);
             });
 
@@ -349,72 +247,28 @@ jobs:
               return;
             }
 
-            console.log(`\n=== INLINE COMMENT DEBUG INFO ===`);
             console.log(`Found ${newLineIssues.length} new line-specific issues`);
-            console.log(`Commit SHA: ${{ steps.get-pr-details.outputs.head_sha }}`);
 
-            // Get list of changed files in the PR to validate against
-            let changedFiles = null;
-            try {
-              const filesResponse = await github.rest.pulls.listFiles({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-              changedFiles = new Set(filesResponse.data.map(f => f.filename));
-              console.log(`\nPR has ${changedFiles.size} changed files:`);
-              filesResponse.data.forEach(f => {
-                console.log(`  - ${f.filename} (status: ${f.status}, changes: +${f.additions}/-${f.deletions})`);
-              });
-            } catch (error) {
-              console.error('Warning: Could not fetch PR files for validation:', error.message);
-            }
-
-            // Validate and prepare comments
-            const validatedIssues = [];
-            const skippedIssues = [];
-
-            console.log(`\n=== VALIDATING COMMENTS ===`);
-            newLineIssues.forEach((issue, idx) => {
-              console.log(`\nComment ${idx + 1}/${newLineIssues.length}:`);
-              console.log(`  File: ${issue.file}`);
-              console.log(`  Line: ${issue.line}`);
-              console.log(`  Category: ${issue.category}`);
-              console.log(`  Severity: ${issue.severity}`);
-              console.log(`  File exists in checkout: ${fs.existsSync(issue.file)}`);
-
-              // Validate file is in PR changes
-              if (changedFiles && !changedFiles.has(issue.file)) {
-                console.log(`  ❌ SKIP: File not in PR changed files`);
-                skippedIssues.push({ issue, reason: 'File not in PR changes' });
-                return;
-              }
-
-              console.log(`  ✓ File is in PR changes`);
-              validatedIssues.push(issue);
+            const filesResponse = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
             });
+            const changedFiles = new Set(filesResponse.data.map(f => f.filename));
+
+            const validatedIssues = newLineIssues.filter(i => changedFiles.has(i.file));
 
             if (validatedIssues.length === 0) {
-              console.log('\n❌ No valid issues to comment on after validation');
-              if (skippedIssues.length > 0) {
-                console.log(`\nSkipped ${skippedIssues.length} issues:`);
-                skippedIssues.forEach(s => {
-                  console.log(`  - ${s.issue.file}:${s.issue.line} - ${s.reason}`);
-                });
-              }
+              console.log('No valid issues to comment on after validation');
               return;
             }
 
-            console.log(`\n=== POSTING COMMENTS (${validatedIssues.length} valid) ===`);
+            console.log(`Posting ${validatedIssues.length} inline comments`);
 
             const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
-            const results = { success: [], failed: [] };
+            let successCount = 0;
 
-            // Post comments individually to handle partial failures
-            for (let i = 0; i < validatedIssues.length; i++) {
-              const issue = validatedIssues[i];
-              console.log(`\n[${i + 1}/${validatedIssues.length}] Posting comment for ${issue.file}:${issue.line}...`);
-
+            for (const issue of validatedIssues) {
               const body = `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`;
 
               try {
@@ -429,60 +283,15 @@ jobs:
                   body: body
                 });
 
-                const commentId = response.data.id;
-                issue.comment_id = commentId;
-                results.success.push({ file: issue.file, line: issue.line, commentId });
-                console.log(`  ✓ SUCCESS - Comment ID: ${commentId}`);
+                issue.comment_id = response.data.id;
+                successCount++;
               } catch (error) {
-                const errorDetails = {
-                  message: error.message,
-                  status: error.status,
-                  response: error.response?.data
-                };
-                results.failed.push({
-                  file: issue.file,
-                  line: issue.line,
-                  error: errorDetails
-                });
-                console.error(`  ✗ FAILED - ${error.message}`);
-                if (error.response?.data) {
-                  console.error(`  Error details: ${JSON.stringify(error.response.data, null, 2)}`);
-                }
+                console.error(`Failed to comment on ${issue.file}:${issue.line} - ${error.message}`);
               }
             }
 
-            // Save updated state with successful comment IDs
             fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-
-            // Print summary
-            console.log(`\n=== SUMMARY ===`);
-            console.log(`✓ Successfully posted: ${results.success.length}/${validatedIssues.length} comments`);
-            if (results.success.length > 0) {
-              console.log('Success:');
-              results.success.forEach(r => {
-                console.log(`  ✓ ${r.file}:${r.line} (comment ID: ${r.commentId})`);
-              });
-            }
-
-            if (results.failed.length > 0) {
-              console.log(`\n✗ Failed: ${results.failed.length} comments`);
-              results.failed.forEach(r => {
-                console.log(`  ✗ ${r.file}:${r.line}`);
-                console.log(`    Reason: ${r.error.message}`);
-                if (r.error.response?.errors) {
-                  r.error.response.errors.forEach(e => {
-                    console.log(`    - ${JSON.stringify(e)}`);
-                  });
-                }
-              });
-            }
-
-            if (skippedIssues.length > 0) {
-              console.log(`\n⊘ Skipped: ${skippedIssues.length} comments`);
-              skippedIssues.forEach(s => {
-                console.log(`  ⊘ ${s.issue.file}:${s.issue.line} - ${s.reason}`);
-              });
-            }
+            console.log(`Successfully posted ${successCount}/${validatedIssues.length} comments`)
 
       - name: Find Existing Results Comment
         if: ${{ steps.review.outcome == 'success' }}
@@ -515,24 +324,7 @@ jobs:
 
       - name: Re-encode State with Comment IDs
         if: ${{ steps.review.outcome == 'success' }}
-        run: |
-          python3 <<'PYTHON_SCRIPT'
-          import json
-          import gzip
-          import base64
-
-          # State was updated by inline comments step with comment_ids
-          with open('state.json', 'r') as f:
-              state = json.load(f)
-
-          # Re-compress state for comment (now includes comment_ids)
-          compressed = gzip.compress(json.dumps(state).encode())
-          encoded = base64.b64encode(compressed).decode()
-          with open('state_encoded.txt', 'w') as f:
-              f.write(encoded)
-
-          print("Re-encoded state with comment IDs")
-          PYTHON_SCRIPT
+        run: npx tsx .github/scripts/encode-state.ts
 
       - name: Detect Ignore Commands
         if: ${{ steps.review.outcome == 'success' }}
@@ -548,13 +340,11 @@ jobs:
             }
 
             const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            console.log(`\n=== IGNORE DETECTION ===`);
-            console.log(`Total issues: ${state.issues.length}`);
+            console.log(`Checking for ignore commands (${state.issues.length} issues)`);
 
             const ignoredIssueNumbers = new Set();
 
-            // PATH A: Scan PR comments for "claude-ignore [numbers]"
-            console.log('\n--- Scanning PR-level comments ---');
+            // Scan PR comments for "claude-ignore [numbers]"
             const allComments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -562,21 +352,19 @@ jobs:
             });
 
             for (const comment of allComments.data) {
-              const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
+              const match = comment.body.match(/claude-review\s+ignore\s+([\d,\s]+)/i);
               if (match) {
                 const numbers = match[1]
                   .split(/[,\s]+/)
                   .map(n => parseInt(n.trim()))
                   .filter(n => !isNaN(n));
 
-                console.log(`Found ignore command in comment ${comment.id}: ${numbers.join(', ')}`);
+                console.log(`Found ignore command: ${numbers.join(', ')}`);
                 numbers.forEach(num => ignoredIssueNumbers.add(num));
               }
             }
 
-            // PATH B: Scan inline review threads for "claude-ignore"
-            console.log('\n--- Scanning inline review threads ---');
-
+            // Scan inline review threads for "claude-ignore"
             try {
               const pr = await github.rest.pulls.get({
                 owner: context.repo.owner,
@@ -605,11 +393,10 @@ jobs:
               `, { prNodeId: pr.data.node_id });
 
               const threads = queryData?.node?.reviewThreads?.nodes || [];
-              console.log(`Found ${threads.length} review threads`);
 
               for (const thread of threads) {
                 const hasIgnoreCommand = thread.comments.nodes.some(c =>
-                  c.body.toLowerCase().includes('claude-ignore')
+                  c.body.toLowerCase().includes('claude-review ignore')
                 );
 
                 if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
@@ -620,8 +407,8 @@ jobs:
                     const issueId = issueIdMatch[1];
                     const issue = state.issues.find(i => i.id === issueId);
 
-                    if (issue && issue.issue_number) {
-                      console.log(`Thread ${thread.id} has ignore for issue #${issue.issue_number}`);
+                    if (issue?.issue_number) {
+                      console.log(`Thread has ignore for issue #${issue.issue_number}`);
                       ignoredIssueNumbers.add(issue.issue_number);
                     }
                   }
@@ -631,144 +418,28 @@ jobs:
               console.error(`Failed to scan review threads: ${error.message}`);
             }
 
-            // Validate issue numbers exist
+            // Apply ignore flags
             const validIssueNumbers = state.issues.map(i => i.issue_number);
-            const invalidNumbers = Array.from(ignoredIssueNumbers).filter(n => !validIssueNumbers.includes(n));
-            if (invalidNumbers.length > 0) {
-              console.log(`⚠️  Invalid issue numbers (skipped): ${invalidNumbers.join(', ')}`);
-            }
-
-            // Apply ignore flags to state
-            console.log(`\n--- Applying ignore flags ---`);
             const validIgnored = Array.from(ignoredIssueNumbers).filter(n => validIssueNumbers.includes(n));
-            console.log(`Issues to ignore: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
 
-            const timestamp = new Date().toISOString();
-            let ignoreCount = 0;
+            if (validIgnored.length > 0) {
+              console.log(`Ignoring issues: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
 
-            for (const issue of state.issues) {
-              if (validIgnored.includes(issue.issue_number)) {
-                if (!issue.ignored) {
+              const timestamp = new Date().toISOString();
+
+              for (const issue of state.issues) {
+                if (validIgnored.includes(issue.issue_number) && !issue.ignored) {
                   issue.ignored = true;
                   issue.ignored_at = timestamp;
-                  ignoreCount++;
-                  console.log(`✓ Marked issue #${issue.issue_number} as ignored`);
-                } else {
-                  console.log(`  Issue #${issue.issue_number} already ignored`);
                 }
               }
+
+              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
             }
-
-            console.log(`\nNewly ignored: ${ignoreCount}`);
-            console.log(`Total ignored: ${state.issues.filter(i => i.ignored).length}`);
-
-            // Save updated state
-            fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
 
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}
-        run: |
-          python3 <<'PYTHON_SCRIPT'
-          import json
-
-          with open('state.json') as f:
-              state = json.load(f)
-          with open('state_encoded.txt') as f:
-              encoded = f.read()
-
-          active = [i for i in state['issues'] if i['status'] != 'resolved' and not i.get('ignored', False)]
-          ignored = [i for i in state['issues'] if i.get('ignored', False)]
-          resolved = [i for i in state['issues'] if i['status'] == 'resolved']
-
-          md = "## 🕵️‍♂️ Claude Review\n\n"
-
-          if not active:
-              md += "✅ **Approved**\n\n" + state['summary']
-          else:
-              new_count = sum(1 for i in active if i['status'] == 'new')
-              pers_count = sum(1 for i in active if i['status'] == 'persisted')
-
-              md += f"**Summary:** {state['summary']}\n\n"
-              md += f"**Issues:** {len(active)} active ({new_count} new, {pers_count} persisted)"
-
-              if ignored:
-                  md += f", {len(ignored)} ignored"
-              if resolved:
-                  md += f", {len(resolved)} resolved ✅"
-              md += "\n\n"
-
-              md += "| # | Status | Severity | Category | Issue | Location |\n"
-              md += "|---|--------|----------|----------|-------|----------|\n"
-
-              for issue in active:
-                  status = "🆕 New" if issue['status'] == 'new' else "🔁 Persisted"
-                  sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
-                  sev = sev_map.get(issue['severity'], '⚪')
-
-                  # Truncate description for table
-                  desc = issue['description']
-                  if len(desc) > 60:
-                      desc = desc[:57] + "..."
-
-                  loc = issue['file']
-                  if issue.get('line'):
-                      loc += f":{issue['line']}"
-
-                  # Add issue number as first column
-                  md += f"| **{issue['issue_number']}** | {status} | {sev} | {issue['category']} | {desc} | {loc} |\n"
-
-              if resolved:
-                  md += "\n### ✅ Recently Resolved\n\n"
-                  for issue in resolved[:5]:  # Show max 5 most recent
-                      loc = issue['file']
-                      if issue.get('line'):
-                          loc += f":{issue['line']}"
-                      desc = issue['description'][:50] + "..." if len(issue['description']) > 50 else issue['description']
-                      md += f"- {desc} ({loc})\n"
-
-          # Add collapsible ignored section
-          if ignored:
-              md += "\n<details>\n"
-              md += "<summary>🙈 Ignored Issues (click to expand)</summary>\n\n"
-              md += f"\n**{len(ignored)} issues ignored** - These will not be reviewed in future runs.\n\n"
-              md += "| # | Severity | Category | Issue | Location | Ignored At |\n"
-              md += "|---|----------|----------|-------|----------|------------|\n"
-
-              for issue in ignored:
-                  sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
-                  sev = sev_map.get(issue.get('severity'), '⚪')
-
-                  desc = issue.get('description', '')
-                  if len(desc) > 50:
-                      desc = desc[:47] + "..."
-
-                  loc = issue.get('file', '')
-                  if issue.get('line'):
-                      loc += f":{issue['line']}"
-
-                  # Format timestamp
-                  ignored_at = issue.get('ignored_at', 'Unknown')
-                  if ignored_at and ignored_at != 'Unknown':
-                      from datetime import datetime
-                      try:
-                          dt = datetime.fromisoformat(ignored_at.replace('Z', '+00:00'))
-                          ignored_at = dt.strftime('%Y-%m-%d %H:%M UTC')
-                      except:
-                          pass
-
-                  md += f"| **{issue.get('issue_number', '?')}** | {sev} | {issue.get('category', 'N/A')} | {desc} | {loc} | {ignored_at} |\n"
-
-              md += "\n</details>\n"
-
-          md += f"\n\n<!-- claude-review-results -->"
-          md += f"\n<!-- state:{encoded} -->"
-          md += f"\n<!-- sha:{state['review_sha']} -->"
-
-          with open('summary.md', 'w') as f:
-              f.write(md)
-
-          print("Generated markdown summary")
-          PYTHON_SCRIPT
+        run: npx tsx .github/scripts/generate-summary.ts
 
       - name: Post Results Comment (First Run)
         if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'false' }}
@@ -803,7 +474,7 @@ jobs:
           edit-mode: replace
 
       - name: Update Running Comment - Failure
-        if: ${{ steps.review.outcome == 'failure' }}
+        if: ${{ failure() && steps.running-comment.outputs.comment-id }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.running-comment.outputs.comment-id }}
