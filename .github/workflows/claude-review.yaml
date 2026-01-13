@@ -265,11 +265,10 @@ jobs:
 
             console.log(`Posting ${validatedIssues.length} inline comments`);
 
-            const severityEmoji = { 'high': '🔴', 'medium': '🟡', 'low': '🔵' };
             let successCount = 0;
 
             for (const issue of validatedIssues) {
-              const body = `${severityEmoji[issue.severity] || '⚪'} **${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`;
+              const body = `${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue:${issue.id} -->`;
 
               try {
                 const response = await github.rest.pulls.createReviewComment({
@@ -324,7 +323,18 @@ jobs:
 
       - name: Re-encode State with Comment IDs
         if: ${{ steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/encode-state.ts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const zlib = require('zlib');
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+            const compressed = zlib.gzipSync(JSON.stringify(state));
+            const encoded = compressed.toString('base64');
+            fs.writeFileSync('state_encoded.txt', encoded);
+
+            console.log('Re-encoded state with comment IDs');
 
       - name: Detect Ignore Commands
         if: ${{ steps.review.outcome == 'success' }}

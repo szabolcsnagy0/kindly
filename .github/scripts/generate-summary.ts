@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "fs";
-import { createHash } from "crypto";
 
 interface ProcessedIssue {
   id: string;
@@ -12,6 +11,7 @@ interface ProcessedIssue {
   description: string;
   file?: string;
   line?: number;
+  comment_id?: number;
   ignored: boolean;
   ignored_at?: string | null;
 }
@@ -25,17 +25,8 @@ interface State {
 const SEVERITY_EMOJI: Record<string, string> = {
   high: "🔴",
   medium: "🟡",
-  low: "🔵",
+  low: "🟢",
 };
-
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + "...";
-}
-
-function diffHash(filePath: string): string {
-  return createHash("sha1").update(filePath).digest("hex");
-}
 
 function formatLocation(
   issue: ProcessedIssue,
@@ -45,14 +36,16 @@ function formatLocation(
   if (!issue.file) return "";
 
   const file = issue.file;
-  const hash = diffHash(file);
+  const line = issue.line;
 
-  if (!issue.line) {
-    return `[${file}](https://github.com/${githubRepo}/pull/${prNumber}/files#diff-${hash})`;
+  // If there's a comment ID, link to the inline comment
+  if (issue.comment_id) {
+    const location = line ? `${file}:${line}` : file;
+    return `[${location}](https://github.com/${githubRepo}/pull/${prNumber}#discussion_r${issue.comment_id})`;
   }
 
-  const line = issue.line;
-  return `[${file}:${line}](https://github.com/${githubRepo}/pull/${prNumber}/files#diff-${hash}R${line})`;
+  // For file-level issues without inline comments, show location without link
+  return line ? `${file}:${line}` : file;
 }
 
 function generateIssueTable(
@@ -60,15 +53,16 @@ function generateIssueTable(
   githubRepo: string,
   prNumber: string
 ): string {
-  let table = "| # | Severity | Category | Issue | Location |\n";
-  table += "|---|----------|----------|-------|----------|\n";
+  let table = "| # | Category | Issue | Location |\n";
+  table += "|---|----------|-------|----------|\n";
 
   for (const issue of issues) {
-    const sev = SEVERITY_EMOJI[issue.severity ?? ""] ?? "⚪";
-    const desc = truncate(issue.description, 60);
+    const sev = SEVERITY_EMOJI[issue.severity ?? "low"];
+    const category = `${sev} ${issue.category}`;
+    const desc = issue.description;
     const loc = formatLocation(issue, githubRepo, prNumber);
 
-    table += `| **${issue.issue_number}** | ${sev} | ${issue.category} | ${desc} | ${loc} |\n`;
+    table += `| **${issue.issue_number}** | ${category} | ${desc} | ${loc} |\n`;
   }
 
   return table;
@@ -108,9 +102,12 @@ function main() {
         md += `, ${ignored.length} ignored`;
       }
       if (resolved.length > 0) {
-        md += `, ${resolved.length} resolved ✅`;
+        md += `, ${resolved.length} resolved`;
       }
       md += "\n\n";
+
+      md +=
+        "> **To ignore issues:** Reply `claude-review ignore` to inline comments, or comment `claude-review ignore 1,2,3` with issue numbers.\n\n";
 
       md += "### Active Issues\n\n";
       md += generateIssueTable(active, githubRepo, prNumber);
@@ -119,7 +116,7 @@ function main() {
     // Add collapsible resolved section
     if (resolved.length > 0) {
       md += "\n<details>\n";
-      md += `<summary>✅ Resolved Issues (${resolved.length})</summary>\n\n`;
+      md += `<summary>Resolved Issues (${resolved.length})</summary>\n\n`;
       md += generateIssueTable(resolved, githubRepo, prNumber);
       md += "\n</details>\n";
     }
@@ -127,7 +124,7 @@ function main() {
     // Add collapsible ignored section
     if (ignored.length > 0) {
       md += "\n<details>\n";
-      md += `<summary>🙈 Ignored Issues (${ignored.length})</summary>\n\n`;
+      md += `<summary>Ignored Issues (${ignored.length})</summary>\n\n`;
       md += generateIssueTable(ignored, githubRepo, prNumber);
       md += "\n</details>\n";
     }
