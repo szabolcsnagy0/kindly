@@ -256,6 +256,7 @@ jobs:
 
           # Match issues against previous state
           prev_by_id = {i['id']: i for i in prev_state.get('issues', [])}
+          max_issue_number = prev_state.get('max_issue_number', 0)
           new_issues = []
 
           for issue in review.get('issues', []):
@@ -271,10 +272,20 @@ jobs:
               issue_id = generate_id(issue)
               prev = prev_by_id.get(issue_id)
 
+              # Get or assign issue number
+              if prev and 'issue_number' in prev:
+                  issue_number = prev['issue_number']
+              else:
+                  max_issue_number += 1
+                  issue_number = max_issue_number
+
               new_issues.append({
                   'id': issue_id,
+                  'issue_number': issue_number,
                   'status': 'persisted' if prev else 'new',
                   'comment_id': prev.get('comment_id') if prev else None,
+                  'ignored': prev.get('ignored', False) if prev else False,
+                  'ignored_at': prev.get('ignored_at') if prev else None,
                   **issue
               })
               prev_by_id.pop(issue_id, None)
@@ -287,6 +298,7 @@ jobs:
           state = {
               'review_sha': current_sha,
               'summary': review.get('summary', 'Review completed'),
+              'max_issue_number': max_issue_number,
               'issues': new_issues
           }
 
@@ -327,6 +339,7 @@ jobs:
             // Filter new issues with line numbers and files
             const newLineIssues = state.issues.filter(i => {
               if (i.status !== 'new' || !i.line || !i.file) return false;
+              if (i.ignored) return false;  // Skip ignored issues
               // Only comment on files that exist in the checkout
               return fs.existsSync(i.file);
             });
@@ -500,182 +513,6 @@ jobs:
               core.setOutput('comment_id', '');
             }
 
-      - name: Resolve Inline Comments for Resolved Issues
-        if: ${{ steps.review.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-
-            if (!fs.existsSync('state.json')) {
-              console.log('No state.json found, skipping comment resolution');
-              return;
-            }
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-
-            console.log(`\n=== RESOLVED ISSUES DEBUG ===`);
-            console.log(`Total issues in state: ${state.issues.length}`);
-
-            const resolvedIssues = state.issues.filter(i => i.status === 'resolved');
-            console.log(`Issues with status=resolved: ${resolvedIssues.length}`);
-
-            if (resolvedIssues.length > 0) {
-              console.log('\nResolved issues:');
-              resolvedIssues.forEach((issue, idx) => {
-                console.log(`  ${idx + 1}. ${issue.file}:${issue.line || 'N/A'}`);
-                console.log(`     Category: ${issue.category}`);
-                console.log(`     Has comment_id: ${!!issue.comment_id}`);
-                console.log(`     comment_id value: ${issue.comment_id || 'null'}`);
-              });
-            }
-
-            // Find resolved issues that have comment IDs
-            const resolvedWithComments = state.issues.filter(i =>
-              i.status === 'resolved' && i.comment_id
-            );
-
-            console.log(`Resolved issues with comment IDs: ${resolvedWithComments.length}`);
-
-            if (resolvedWithComments.length === 0) {
-              console.log('No resolved issues with comment IDs to resolve');
-              return;
-            }
-
-            console.log(`\n=== BUILDING COMMENT-TO-THREAD MAPPING ===`);
-
-            // Build mapping from comment node_id to review thread
-            const commentNodeIdToThreadMapping = {};
-
-            try {
-              // First, get the PR's node ID using REST API
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-
-              console.log(`PR node ID: ${pr.data.node_id}`);
-
-              // Use the node ID to query review threads
-              const queryData = await github.graphql(`
-                query($prNodeId: ID!) {
-                  node(id: $prNodeId) {
-                    ... on PullRequest {
-                      reviewThreads(last: 100) {
-                        totalCount
-                        nodes {
-                          id
-                          isResolved
-                          comments(last: 100) {
-                            totalCount
-                            nodes {
-                              id
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, {
-                prNodeId: pr.data.node_id
-              });
-
-              const reviewThreads = queryData?.node?.reviewThreads?.nodes;
-
-              if (reviewThreads) {
-                console.log(`Found ${reviewThreads.length} review threads`);
-                for (const thread of reviewThreads) {
-                  if (thread?.comments?.nodes) {
-                    for (const comment of thread.comments.nodes) {
-                      if (comment?.id) {
-                        commentNodeIdToThreadMapping[comment.id] = thread;
-                      }
-                    }
-                  }
-                }
-                console.log(`Built mapping for ${Object.keys(commentNodeIdToThreadMapping).length} comments`);
-              }
-            } catch (error) {
-              console.error(`Failed to build comment-to-thread mapping: ${error.message}`);
-              console.error(`Error details: ${JSON.stringify(error, null, 2)}`);
-              return;
-            }
-
-            console.log(`\n=== RESOLVING ${resolvedWithComments.length} INLINE COMMENTS ===`);
-
-            const results = { success: [], failed: [] };
-
-            // Resolve threads for resolved issues
-            for (const issue of resolvedWithComments) {
-              console.log(`\nResolving comment ${issue.comment_id} for ${issue.file}:${issue.line || 'N/A'}...`);
-
-              try {
-                // Get the comment's node_id
-                const comment = await github.rest.pulls.getReviewComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: issue.comment_id
-                });
-
-                const commentNodeId = comment.data.node_id;
-                const reviewThread = commentNodeIdToThreadMapping[commentNodeId];
-
-                if (!reviewThread) {
-                  console.log(`  ⚠️  No review thread found for comment`);
-                  results.failed.push({
-                    file: issue.file,
-                    line: issue.line,
-                    commentId: issue.comment_id,
-                    error: 'No review thread found'
-                  });
-                  continue;
-                }
-
-                if (reviewThread.isResolved) {
-                  console.log(`  ℹ️  Thread already resolved, skipping`);
-                  results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
-                  continue;
-                }
-
-                // Resolve the thread
-                await github.graphql(`
-                  mutation($threadId: ID!) {
-                    resolveReviewThread(input: {threadId: $threadId}) {
-                      thread {
-                        id
-                        isResolved
-                      }
-                    }
-                  }
-                `, {
-                  threadId: reviewThread.id
-                });
-
-                results.success.push({ file: issue.file, line: issue.line, commentId: issue.comment_id });
-                console.log(`  ✓ SUCCESS - Resolved thread ${reviewThread.id}`);
-              } catch (error) {
-                results.failed.push({
-                  file: issue.file,
-                  line: issue.line,
-                  commentId: issue.comment_id,
-                  error: error.message
-                });
-                console.error(`  ✗ FAILED - ${error.message}`);
-              }
-            }
-
-            console.log(`\n=== RESOLUTION SUMMARY ===`);
-            console.log(`✓ Successfully resolved: ${results.success.length}/${resolvedWithComments.length} threads`);
-            if (results.failed.length > 0) {
-              console.log(`✗ Failed to resolve: ${results.failed.length} threads`);
-              results.failed.forEach(r => {
-                console.log(`  ✗ ${r.file}:${r.line || 'N/A'} (comment ${r.commentId}): ${r.error}`);
-              });
-            }
-
       - name: Re-encode State with Comment IDs
         if: ${{ steps.review.outcome == 'success' }}
         run: |
@@ -697,6 +534,137 @@ jobs:
           print("Re-encoded state with comment IDs")
           PYTHON_SCRIPT
 
+      - name: Detect Ignore Commands
+        if: ${{ steps.review.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            if (!fs.existsSync('state.json')) {
+              console.log('No state.json found, skipping ignore detection');
+              return;
+            }
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+            console.log(`\n=== IGNORE DETECTION ===`);
+            console.log(`Total issues: ${state.issues.length}`);
+
+            const ignoredIssueNumbers = new Set();
+
+            // PATH A: Scan PR comments for "claude-review ignore [numbers]"
+            console.log('\n--- Scanning PR-level comments ---');
+            const allComments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            for (const comment of allComments.data) {
+              const match = comment.body.match(/claude-review\s+ignore\s+([\d,\s]+)/i);
+              if (match) {
+                const numbers = match[1]
+                  .split(/[,\s]+/)
+                  .map(n => parseInt(n.trim()))
+                  .filter(n => !isNaN(n));
+
+                console.log(`Found ignore command in comment ${comment.id}: ${numbers.join(', ')}`);
+                numbers.forEach(num => ignoredIssueNumbers.add(num));
+              }
+            }
+
+            // PATH B: Scan inline review threads for "claude-review ignore"
+            console.log('\n--- Scanning inline review threads ---');
+
+            try {
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+
+              const queryData = await github.graphql(`
+                query($prNodeId: ID!) {
+                  node(id: $prNodeId) {
+                    ... on PullRequest {
+                      reviewThreads(last: 100) {
+                        nodes {
+                          id
+                          comments(last: 50) {
+                            nodes {
+                              id
+                              body
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { prNodeId: pr.data.node_id });
+
+              const threads = queryData?.node?.reviewThreads?.nodes || [];
+              console.log(`Found ${threads.length} review threads`);
+
+              for (const thread of threads) {
+                const hasIgnoreCommand = thread.comments.nodes.some(c =>
+                  c.body.toLowerCase().includes('claude-review ignore')
+                );
+
+                if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
+                  const firstComment = thread.comments.nodes[0];
+                  const issueIdMatch = firstComment.body.match(/<!-- issue:(\w+) -->/);
+
+                  if (issueIdMatch) {
+                    const issueId = issueIdMatch[1];
+                    const issue = state.issues.find(i => i.id === issueId);
+
+                    if (issue && issue.issue_number) {
+                      console.log(`Thread ${thread.id} has ignore for issue #${issue.issue_number}`);
+                      ignoredIssueNumbers.add(issue.issue_number);
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Failed to scan review threads: ${error.message}`);
+            }
+
+            // Validate issue numbers exist
+            const validIssueNumbers = state.issues.map(i => i.issue_number);
+            const invalidNumbers = Array.from(ignoredIssueNumbers).filter(n => !validIssueNumbers.includes(n));
+            if (invalidNumbers.length > 0) {
+              console.log(`⚠️  Invalid issue numbers (skipped): ${invalidNumbers.join(', ')}`);
+            }
+
+            // Apply ignore flags to state
+            console.log(`\n--- Applying ignore flags ---`);
+            const validIgnored = Array.from(ignoredIssueNumbers).filter(n => validIssueNumbers.includes(n));
+            console.log(`Issues to ignore: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
+
+            const timestamp = new Date().toISOString();
+            let ignoreCount = 0;
+
+            for (const issue of state.issues) {
+              if (validIgnored.includes(issue.issue_number)) {
+                if (!issue.ignored) {
+                  issue.ignored = true;
+                  issue.ignored_at = timestamp;
+                  ignoreCount++;
+                  console.log(`✓ Marked issue #${issue.issue_number} as ignored`);
+                } else {
+                  console.log(`  Issue #${issue.issue_number} already ignored`);
+                }
+              }
+            }
+
+            console.log(`\nNewly ignored: ${ignoreCount}`);
+            console.log(`Total ignored: ${state.issues.filter(i => i.ignored).length}`);
+
+            // Save updated state
+            fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
+
       - name: Generate Markdown Summary
         if: ${{ steps.review.outcome == 'success' }}
         run: |
@@ -708,7 +676,8 @@ jobs:
           with open('state_encoded.txt') as f:
               encoded = f.read()
 
-          active = [i for i in state['issues'] if i['status'] != 'resolved']
+          active = [i for i in state['issues'] if i['status'] != 'resolved' and not i.get('ignored', False)]
+          ignored = [i for i in state['issues'] if i.get('ignored', False)]
           resolved = [i for i in state['issues'] if i['status'] == 'resolved']
 
           md = "## 🕵️‍♂️ Claude Review\n\n"
@@ -722,15 +691,17 @@ jobs:
               md += f"**Summary:** {state['summary']}\n\n"
               md += f"**Issues:** {len(active)} active ({new_count} new, {pers_count} persisted)"
 
+              if ignored:
+                  md += f", {len(ignored)} ignored"
               if resolved:
                   md += f", {len(resolved)} resolved ✅"
               md += "\n\n"
 
-              md += "| Status | Severity | Category | Issue | Location |\n"
-              md += "|--------|----------|----------|-------|----------|\n"
+              md += "| # | Status | Severity | Category | Issue | Location |\n"
+              md += "|---|--------|----------|----------|-------|----------|\n"
 
               for issue in active:
-                  status = "New" if issue['status'] == 'new' else "Persisted"
+                  status = "🆕 New" if issue['status'] == 'new' else "🔁 Persisted"
                   sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
                   sev = sev_map.get(issue['severity'], '⚪')
 
@@ -743,7 +714,8 @@ jobs:
                   if issue.get('line'):
                       loc += f":{issue['line']}"
 
-                  md += f"| {status} | {sev} | {issue['category']} | {desc} | {loc} |\n"
+                  # Add issue number as first column
+                  md += f"| **{issue['issue_number']}** | {status} | {sev} | {issue['category']} | {desc} | {loc} |\n"
 
               if resolved:
                   md += "\n### ✅ Recently Resolved\n\n"
@@ -753,6 +725,40 @@ jobs:
                           loc += f":{issue['line']}"
                       desc = issue['description'][:50] + "..." if len(issue['description']) > 50 else issue['description']
                       md += f"- {desc} ({loc})\n"
+
+          # Add collapsible ignored section
+          if ignored:
+              md += "\n<details>\n"
+              md += "<summary>🙈 Ignored Issues (click to expand)</summary>\n\n"
+              md += f"\n**{len(ignored)} issues ignored** - These will not be reviewed in future runs.\n\n"
+              md += "| # | Severity | Category | Issue | Location | Ignored At |\n"
+              md += "|---|----------|----------|-------|----------|------------|\n"
+
+              for issue in ignored:
+                  sev_map = {"high": "🔴", "medium": "🟡", "low": "🔵"}
+                  sev = sev_map.get(issue.get('severity'), '⚪')
+
+                  desc = issue.get('description', '')
+                  if len(desc) > 50:
+                      desc = desc[:47] + "..."
+
+                  loc = issue.get('file', '')
+                  if issue.get('line'):
+                      loc += f":{issue['line']}"
+
+                  # Format timestamp
+                  ignored_at = issue.get('ignored_at', 'Unknown')
+                  if ignored_at and ignored_at != 'Unknown':
+                      from datetime import datetime
+                      try:
+                          dt = datetime.fromisoformat(ignored_at.replace('Z', '+00:00'))
+                          ignored_at = dt.strftime('%Y-%m-%d %H:%M UTC')
+                      except:
+                          pass
+
+                  md += f"| **{issue.get('issue_number', '?')}** | {sev} | {issue.get('category', 'N/A')} | {desc} | {loc} | {ignored_at} |\n"
+
+              md += "\n</details>\n"
 
           md += f"\n\n<!-- claude-review-results -->"
           md += f"\n<!-- state:{encoded} -->"
