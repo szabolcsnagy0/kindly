@@ -15,7 +15,6 @@ interface Issue {
 
 interface State {
   review_sha: string;
-  summary: string;
   issues: Issue[];
 }
 
@@ -87,12 +86,11 @@ function main() {
     let md = "## 🕵️‍♂️ Claude Review\n\n";
 
     if (active.length === 0) {
-      md += "✅ **Approved**\n\n" + state.summary;
+      md += "✅ **Approved**\n\n";
     } else {
       const newCount = active.filter((i) => i.status === "new").length;
       const persCount = active.filter((i) => i.status === "persisted").length;
 
-      md += `**Summary:** ${state.summary}\n\n`;
       md += `**Issues:** ${active.length} active (${newCount} new, ${persCount} persisted)`;
 
       if (ignored.length > 0) {

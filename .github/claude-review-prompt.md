@@ -147,7 +147,6 @@ Only the JSON INSIDE the tags will be processed.
 
 <review_output>
 {
-  "summary": "2-3 sentences: what changed and what you verified",
   "new_issues": [
     {
       "severity": "high" | "medium" | "low",

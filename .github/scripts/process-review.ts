@@ -19,7 +19,6 @@ interface Issue {
 }
 
 interface ReviewOutput {
-  summary: string;
   new_issues: Issue[];
   persisted_issue_numbers: number[];
   resolved_issue_numbers: number[];
@@ -27,7 +26,6 @@ interface ReviewOutput {
 
 interface State {
   review_sha: string;
-  summary: string;
   max_issue_number: number;
   issues: Issue[];
 }
@@ -59,7 +57,6 @@ async function main() {
 
     // Validate review output
     if (
-      !review.summary ||
       !Array.isArray(review.new_issues) ||
       !Array.isArray(review.persisted_issue_numbers) ||
       !Array.isArray(review.resolved_issue_numbers)
@@ -150,7 +147,6 @@ async function main() {
     // Create new state
     const state: State = {
       review_sha: currentSha,
-      summary: review.summary,
       max_issue_number: maxIssueNumber,
       issues: processedIssues,
     };
