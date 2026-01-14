@@ -156,7 +156,7 @@ jobs:
 
             const ignoredIssueNumbers = new Set();
 
-            // Scan PR comments for "claude-ignore [numbers]"
+            // Scan all PR comments for "claude-ignore [numbers]"
             const allComments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -171,12 +171,14 @@ jobs:
                   .map(n => parseInt(n.trim()))
                   .filter(n => !isNaN(n));
 
-                console.log(`Found ignore command in comment: ${numbers.join(', ')}`);
-                numbers.forEach(num => ignoredIssueNumbers.add(num));
+                if (numbers.length > 0) {
+                  console.log(`Found ignore command in comment ${comment.id}: ${numbers.join(', ')}`);
+                  numbers.forEach(num => ignoredIssueNumbers.add(num));
+                }
               }
             }
 
-            // Scan inline review threads for "claude-ignore"
+            // Scan inline review thread comments for "claude-ignore [numbers]"
             try {
               const pr = await github.rest.pulls.get({
                 owner: context.repo.owner,
@@ -207,19 +209,18 @@ jobs:
               const threads = queryData?.node?.reviewThreads?.nodes ?? [];
 
               for (const thread of threads) {
-                const hasIgnoreCommand = thread.comments.nodes.some(c =>
-                  c.body.toLowerCase().includes('claude-ignore')
-                );
+                for (const comment of thread.comments.nodes) {
+                  const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
+                  if (match) {
+                    const numbers = match[1]
+                      .split(/[,\s]+/)
+                      .map(n => parseInt(n.trim()))
+                      .filter(n => !isNaN(n));
 
-                if (hasIgnoreCommand && thread.comments.nodes.length > 0) {
-                  const firstComment = thread.comments.nodes[0];
-
-                  // Try to find issue by issue_number marker
-                  const issueNumMatch = firstComment.body.match(/<!-- issue_number:(\d+) -->/);
-                  if (issueNumMatch) {
-                    const issueNum = parseInt(issueNumMatch[1]);
-                    console.log(`Thread has ignore for issue #${issueNum}`);
-                    ignoredIssueNumbers.add(issueNum);
+                    if (numbers.length > 0) {
+                      console.log(`Found ignore command in thread comment: ${numbers.join(', ')}`);
+                      numbers.forEach(num => ignoredIssueNumbers.add(num));
+                    }
                   }
                 }
               }
@@ -438,7 +439,7 @@ jobs:
             let successCount = 0;
 
             for (const issue of validatedIssues) {
-              const body = `${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue_number:${issue.issue_number} -->`;
+              const body = `**Issue #${issue.issue_number}** ${issue.category}\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n---\n*To ignore this issue, reply with:* \`claude-ignore ${issue.issue_number}\`\n\n<!-- issue_number:${issue.issue_number} -->`;
 
               try {
                 const response = await github.rest.pulls.createReviewComment({
