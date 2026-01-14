@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { gzip } from "zlib";
 import { promisify } from "util";
 
@@ -68,9 +68,14 @@ async function main() {
       process.exit(1);
     }
 
-    // Load previous state
-    const prevStateJson = process.env.PREVIOUS_STATE ?? "{}";
-    const prevState: Partial<State> = JSON.parse(prevStateJson);
+    // Load previous state (with ignored issues already applied)
+    let prevState: Partial<State> = {};
+    if (existsSync("state.json")) {
+      prevState = JSON.parse(readFileSync("state.json", "utf-8"));
+      console.log(`Loaded previous state from state.json with ${prevState.issues?.length ?? 0} issues`);
+    } else {
+      console.log("No state.json found, starting fresh");
+    }
     let maxIssueNumber = prevState.max_issue_number ?? 0;
 
     // Build map of previous issues by number

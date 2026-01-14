@@ -104,7 +104,7 @@ function main() {
       md += "\n\n";
 
       md +=
-        "> **To ignore issues:** Reply `claude-review ignore` to inline comments, or comment `claude-review ignore 1,2,3` with issue numbers.\n\n";
+        "> **To ignore issues:** Reply `claude-ignore` to inline comments, or comment `claude-ignore 1,2,3` with issue numbers.\n\n";
 
       md += "### Active Issues\n\n";
       md += generateIssueTable(active, githubRepo, prNumber);
