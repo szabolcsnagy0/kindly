@@ -443,7 +443,7 @@ jobs:
             let successCount = 0;
 
             for (const issue of validatedIssues) {
-              const body = `**Issue #${issue.issue_number}** ${issue.category}\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n---\n*To ignore this issue, reply with:* \`claude-ignore ${issue.issue_number}\`\n\n<!-- issue_number:${issue.issue_number} -->`;
+              const body = `**Issue ${issue.issue_number}:** ${issue.category}\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue_number:${issue.issue_number} -->`;
 
               try {
                 const response = await github.rest.pulls.createReviewComment({
