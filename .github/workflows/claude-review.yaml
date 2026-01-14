@@ -341,88 +341,6 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Encode State (No Changes)
-        if: ${{ steps.validate.outputs.has_changes == 'false' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const zlib = require('zlib');
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            const compressed = zlib.gzipSync(JSON.stringify(state));
-            const encoded = compressed.toString('base64');
-            fs.writeFileSync('state_encoded.txt', encoded);
-
-            console.log('Encoded state for summary');
-
-      - name: Generate Summary (No Changes)
-        if: ${{ steps.validate.outputs.has_changes == 'false' }}
-        run: npx tsx .github/scripts/generate-summary.ts
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_PR_NUMBER: ${{ env.GITHUB_PR_NUMBER }}
-
-      - name: Find Results Comment (No Changes)
-        if: ${{ steps.validate.outputs.has_changes == 'false' }}
-        id: find-results-comment-no-changes
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const marker = '<!-- claude-review-results -->';
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const resultsComment = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes(marker)
-            );
-
-            if (resultsComment) {
-              console.log(`Found existing results comment: ${resultsComment.id}`);
-              core.setOutput('exists', 'true');
-              core.setOutput('comment_id', resultsComment.id);
-            } else {
-              console.log('No results comment found');
-              core.setOutput('exists', 'false');
-              core.setOutput('comment_id', '');
-            }
-
-      - name: Update Comment (No Changes - First Run)
-        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'false' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.running-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: summary.md
-          edit-mode: replace
-
-      - name: Update Results Comment (No Changes - Subsequent)
-        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'true' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.find-results-comment-no-changes.outputs.comment_id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: summary.md
-          edit-mode: replace
-
-      - name: Update Running Comment (No Changes - Subsequent)
-        if: ${{ steps.validate.outputs.has_changes == 'false' && steps.find-results-comment-no-changes.outputs.exists == 'true' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.running-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body: |
-            ## ✅ Review Updated
-
-            No changes detected since the last review, but ignored issues have been updated.
-
-            See the [results comment](https://github.com/${{ github.repository }}/pull/${{ env.GITHUB_PR_NUMBER }}#issuecomment-${{ steps.find-results-comment-no-changes.outputs.comment_id }}).
-          edit-mode: replace
-
       - name: Prepare Changed Files
         if: ${{ steps.validate.outputs.has_changes == 'true' }}
         run: |
@@ -544,15 +462,36 @@ jobs:
             fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
             console.log(`Successfully posted ${successCount}/${validatedIssues.length} comments`)
 
-      - name: Find Existing Results Comment
-        if: ${{ steps.review.outcome == 'success' }}
+      - name: Encode State
+        if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const zlib = require('zlib');
+
+            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
+            const compressed = zlib.gzipSync(JSON.stringify(state));
+            const encoded = compressed.toString('base64');
+            fs.writeFileSync('state_encoded.txt', encoded);
+
+            console.log('Encoded state for summary');
+
+      - name: Generate Summary
+        if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
+        run: npx tsx .github/scripts/generate-summary.ts
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ env.GITHUB_PR_NUMBER }}
+
+      - name: Find Results Comment
+        if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
         id: find-results-comment
         uses: actions/github-script@v7
         with:
           script: |
             const marker = '<!-- claude-review-results -->';
 
-            // Find existing results comment
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -568,64 +507,56 @@ jobs:
               core.setOutput('exists', 'true');
               core.setOutput('comment_id', resultsComment.id);
             } else {
-              console.log('No results comment found - will use running comment as results');
+              console.log('No results comment found');
               core.setOutput('exists', 'false');
               core.setOutput('comment_id', '');
             }
 
-      - name: Re-encode State with Comment IDs
-        if: ${{ steps.review.outcome == 'success' }}
+      - name: Update Comments
+        if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const zlib = require('zlib');
+            const summaryMd = fs.readFileSync('summary.md', 'utf-8');
 
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            const compressed = zlib.gzipSync(JSON.stringify(state));
-            const encoded = compressed.toString('base64');
-            fs.writeFileSync('state_encoded.txt', encoded);
+            const resultsExists = '${{ steps.find-results-comment.outputs.exists }}' === 'true';
+            const resultsCommentId = '${{ steps.find-results-comment.outputs.comment_id }}';
+            const runningCommentId = '${{ steps.running-comment.outputs.comment-id }}';
+            const hasChanges = '${{ steps.validate.outputs.has_changes }}' === 'true';
 
-            console.log('Re-encoded state with comment IDs');
+            if (!resultsExists) {
+              // First run: Convert running comment to results comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: runningCommentId,
+                body: summaryMd
+              });
+              console.log('Updated running comment with results (first run)');
+            } else {
+              // Subsequent: Update results comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: resultsCommentId,
+                body: summaryMd
+              });
+              console.log('Updated results comment');
 
-      - name: Generate Markdown Summary
-        if: ${{ steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/generate-summary.ts
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_PR_NUMBER: ${{ env.GITHUB_PR_NUMBER }}
+              // Update running comment with link
+              const linkBody = hasChanges
+                ? `## ✅ Claude Review Complete\n\nReview finished successfully! See the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).\n\n[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+                : `## ✅ Claude Review Complete\n\nNo changes detected since the last review.\n\nSee the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).`;
 
-      - name: Post Results Comment (First Run)
-        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'false' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.running-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: summary.md
-          edit-mode: replace
-
-      - name: Update Results Comment (Subsequent Runs)
-        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'true' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.find-results-comment.outputs.comment_id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body-path: summary.md
-          edit-mode: replace
-
-      - name: Update Running Comment (Subsequent Runs)
-        if: ${{ steps.review.outcome == 'success' && steps.find-results-comment.outputs.exists == 'true' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          comment-id: ${{ steps.running-comment.outputs.comment-id }}
-          issue-number: ${{ env.GITHUB_PR_NUMBER }}
-          body: |
-            ## ✅ Claude Review Complete
-
-            Review finished successfully! See the [results comment](https://github.com/${{ github.repository }}/pull/${{ env.GITHUB_PR_NUMBER }}#issuecomment-${{ steps.find-results-comment.outputs.comment_id }}).
-
-            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          edit-mode: replace
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: runningCommentId,
+                body: linkBody
+              });
+              console.log('Updated running comment with link');
+            }
 
       - name: Update Running Comment - Failure
         if: ${{ failure() && steps.running-comment.outputs.comment-id }}
