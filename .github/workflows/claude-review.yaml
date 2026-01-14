@@ -167,8 +167,11 @@ jobs:
               issue_number: context.issue.number
             });
 
+            // Matches 'claude-ignore' at start of string or start of line
+            const IGNORE_REGEX = /(?:^|\n)\s*claude-ignore\s+([\d,\s]+)/i;
+
             for (const comment of allComments.data) {
-              const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
+              const match = comment.body.match(IGNORE_REGEX);
               if (match) {
                 const numbers = match[1]
                   .split(/[,\s]+/)
@@ -214,7 +217,7 @@ jobs:
 
               for (const thread of threads) {
                 for (const comment of thread.comments.nodes) {
-                  const match = comment.body.match(/claude-ignore\s+([\d,\s]+)/i);
+                  const match = comment.body.match(IGNORE_REGEX);
                   if (match) {
                     const numbers = match[1]
                       .split(/[,\s]+/)
