@@ -6,6 +6,7 @@ from .request import Request, RequestStatus
 from .request_type import RequestType
 from .type_of import TypeOf
 from .user import User
+from .badge_achievement import BadgeAchievement
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "TypeOf",
     "User",
     "RefreshToken",
+    "BadgeAchievement",
 ]
