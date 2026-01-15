@@ -3,14 +3,20 @@ name: Claude Review
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR Number to review'
+        required: true
+        type: string
 
-run-name: ${{ github.workflow }}--${{ github.event.issue.number }}
+run-name: ${{ github.workflow }}--${{ github.event.issue.number || inputs.pr_number }}
 
 env:
-  GITHUB_PR_NUMBER: ${{ github.event.issue.number }}
+  GITHUB_PR_NUMBER: ${{ github.event.issue.number || inputs.pr_number }}
 
 concurrency:
-  group: claude-review-${{ github.event.issue.number }}
+  group: claude-review-${{ github.event.issue.number || inputs.pr_number }}
   cancel-in-progress: true
 
 permissions:
@@ -20,12 +26,13 @@ permissions:
 
 jobs:
   claude-review:
-    # Trigger only on PR comments starting with 'claude-review'
-    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, 'claude-review') }}
+    # Trigger on PR comments starting with '@claude-review' OR manual workflow dispatch
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '@claude-review')) }}
     runs-on: ubuntu-latest
 
     steps:
       - name: React to Trigger Comment
+        if: ${{ github.event_name == 'issue_comment' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -61,7 +68,7 @@ jobs:
             const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number
+              pull_number: process.env.GITHUB_PR_NUMBER
             });
             core.setOutput('base_branch', pr.data.base.ref);
             core.setOutput('head_sha', pr.data.head.sha);
@@ -80,7 +87,7 @@ jobs:
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number
+              issue_number: process.env.GITHUB_PR_NUMBER
             });
 
             // Find last comment by bot that contains state
@@ -160,15 +167,15 @@ jobs:
 
             const ignoredIssueNumbers = new Set();
 
-            // Scan all PR comments for "claude-ignore [numbers]"
+            // Scan all PR comments for "@claude-ignore [numbers]"
             const allComments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number
+              issue_number: process.env.GITHUB_PR_NUMBER
             });
 
-            // Matches 'claude-ignore' at start of string or start of line
-            const IGNORE_REGEX = /(?:^|\n)\s*claude-ignore\s+([\d,\s]+)/i;
+            // Matches '@claude-ignore' at start of string or start of line
+            const IGNORE_REGEX = /(?:^|\n)\s*@claude-ignore\s+([\d,\s]+)/i;
 
             for (const comment of allComments.data) {
               const match = comment.body.match(IGNORE_REGEX);
@@ -185,12 +192,12 @@ jobs:
               }
             }
 
-            // Scan inline review thread comments for "claude-ignore [numbers]"
+            // Scan inline review thread comments for "@claude-ignore [numbers]"
             try {
               const pr = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number
+                pull_number: process.env.GITHUB_PR_NUMBER
               });
 
               const queryData = await github.graphql(`
@@ -430,7 +437,7 @@ jobs:
             const filesResponse = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number
+              pull_number: process.env.GITHUB_PR_NUMBER
             });
             const changedFiles = new Set(filesResponse.data.map(f => f.filename));
 
@@ -452,7 +459,7 @@ jobs:
                 const response = await github.rest.pulls.createReviewComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  pull_number: context.issue.number,
+                  pull_number: process.env.GITHUB_PR_NUMBER,
                   commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
                   path: issue.file,
                   line: issue.line,
@@ -503,7 +510,7 @@ jobs:
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number
+              issue_number: process.env.GITHUB_PR_NUMBER
             });
 
             const resultsComment = comments.data.find(c =>
@@ -554,8 +561,8 @@ jobs:
 
               // Update running comment with link
               const linkBody = hasChanges
-                ? `## ✅ Claude Review Complete\n\nReview finished successfully! See the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).\n\n[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
-                : `## ✅ Claude Review Complete\n\nNo changes detected since the last review.\n\nSee the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).`;
+                ? `## ✅ Claude Review Complete\n\nReview finished successfully! See the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${process.env.GITHUB_PR_NUMBER}#issuecomment-${resultsCommentId}).\n\n[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
+                : `## ✅ Claude Review Complete\n\nNo changes detected since the last review.\n\nSee the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${process.env.GITHUB_PR_NUMBER}#issuecomment-${resultsCommentId}).`;
 
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
