@@ -3,14 +3,20 @@ name: Claude Review
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR Number to review'
+        required: true
+        type: string
 
-run-name: ${{ github.workflow }}--${{ github.event.issue.number }}
+run-name: ${{ github.workflow }}--${{ github.event.issue.number || inputs.pr_number }}
 
 env:
-  GITHUB_PR_NUMBER: ${{ github.event.issue.number }}
+  GITHUB_PR_NUMBER: ${{ github.event.issue.number || inputs.pr_number }}
 
 concurrency:
-  group: claude-review-${{ github.event.issue.number }}
+  group: claude-review-${{ github.event.issue.number || inputs.pr_number }}
   cancel-in-progress: true
 
 permissions:
@@ -20,13 +26,14 @@ permissions:
 
 jobs:
   claude-review:
-    # Trigger only on PR comments starting with 'claude-review'
-    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, 'claude-review') }}
+    # Trigger on PR comments starting with 'claude-review' OR manual workflow dispatch
+    if: ${{ (github.event.issue.pull_request && startsWith(github.event.comment.body, 'claude-review')) || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: React to Trigger Comment
-        uses: actions/github-script@v7
+        if: ${{ github.event_name == 'issue_comment' }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             github.rest.reactions.createForIssueComment({
@@ -37,7 +44,7 @@ jobs:
             })
 
       - name: Checkout PR Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: refs/pull/${{ env.GITHUB_PR_NUMBER }}/head
           fetch-depth: 0
@@ -45,7 +52,7 @@ jobs:
 
       - name: Post Running Comment
         id: running-comment
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
           body: |
@@ -55,13 +62,13 @@ jobs:
 
       - name: Get PR Details
         id: get-pr-details
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number
+              pull_number: process.env.GITHUB_PR_NUMBER
             });
             core.setOutput('base_branch', pr.data.base.ref);
             core.setOutput('head_sha', pr.data.head.sha);
@@ -70,255 +77,49 @@ jobs:
       - name: Fetch Base Branch
         run: git fetch origin ${{ steps.get-pr-details.outputs.base_branch }}
 
-      - name: Get Previous Review State
-        id: get-state
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const zlib = require('zlib');
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            // Find last comment by bot that contains state
-            const botComments = comments.data
-              .filter(c => c.user.type === 'Bot' && c.body.includes('<!-- state:'))
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-            const botComment = botComments.length > 0 ? botComments[0] : null;
-
-            if (!botComment) {
-              console.log('No previous state found');
-              core.setOutput('state', '{}');
-              core.setOutput('previous_sha', '');
-              return;
-            }
-
-            // Extract state
-            const match = botComment.body.match(/<!-- state:([A-Za-z0-9+/=]+) -->/);
-            if (!match) {
-              console.log('No state marker found in comment');
-              core.setOutput('state', '{}');
-              core.setOutput('previous_sha', '');
-              return;
-            }
-
-            try {
-              // Decompress state
-              const compressed = Buffer.from(match[1], 'base64');
-              const json = zlib.gunzipSync(compressed).toString('utf-8');
-              const state = JSON.parse(json);
-
-              console.log(`Loaded previous state from SHA ${state.review_sha}`);
-              console.log(`Previous state has ${state.issues?.length || 0} issues`);
-
-              core.setOutput('state', json);
-              core.setOutput('previous_sha', state.review_sha);
-            } catch (error) {
-              console.error('Failed to parse previous state:', error.message);
-              core.setOutput('state', '{}');
-              core.setOutput('previous_sha', '');
-            }
-
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: '20'
 
       - name: Install Dependencies
         run: |
           npm install -g tsx
-          # Ensure ripgrep is installed (usually pre-installed on ubuntu-latest)
+          # Ensure ripgrep is installed
           command -v rg >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y ripgrep
 
-      - name: Write Previous State to File
-        uses: actions/github-script@v7
+      - name: Get Previous Review State
+        id: get-state
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/get-previous-state.ts');
+            const { state, previous_sha } = await main(github, context);
+
+            // Save state to file
             const fs = require('fs');
-            const state = ${{ steps.get-state.outputs.state }};
             fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-            console.log(`Wrote state with ${state.issues?.length ?? 0} issues`);
+            console.log(`Wrote state with ${state.issues.length} issues`);
+
+            // Set output for next steps
+            core.setOutput('previous_sha', previous_sha);
 
       - name: Detect Ignore Commands
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const fs = require('fs');
-
-            if (!fs.existsSync('state.json')) {
-              console.log('No state.json found, skipping ignore detection');
-              return;
-            }
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            console.log(`Checking for ignore commands (${state.issues?.length ?? 0} issues)`);
-
-            const ignoredIssueNumbers = new Set();
-
-            // Scan all PR comments for "claude-ignore [numbers]"
-            const allComments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            // Matches 'claude-ignore' at start of string or start of line
-            const IGNORE_REGEX = /(?:^|\n)\s*claude-ignore\s+([\d,\s]+)/i;
-
-            for (const comment of allComments.data) {
-              const match = comment.body.match(IGNORE_REGEX);
-              if (match) {
-                const numbers = match[1]
-                  .split(/[,\s]+/)
-                  .map(n => parseInt(n.trim()))
-                  .filter(n => !isNaN(n));
-
-                if (numbers.length > 0) {
-                  console.log(`Found ignore command in comment ${comment.id}: ${numbers.join(', ')}`);
-                  numbers.forEach(num => ignoredIssueNumbers.add(num));
-                }
-              }
-            }
-
-            // Scan inline review thread comments for "claude-ignore [numbers]"
-            try {
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number
-              });
-
-              const queryData = await github.graphql(`
-                query($prNodeId: ID!) {
-                  node(id: $prNodeId) {
-                    ... on PullRequest {
-                      reviewThreads(last: 100) {
-                        nodes {
-                          id
-                          comments(last: 50) {
-                            nodes {
-                              id
-                              body
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { prNodeId: pr.data.node_id });
-
-              const threads = queryData?.node?.reviewThreads?.nodes ?? [];
-
-              for (const thread of threads) {
-                for (const comment of thread.comments.nodes) {
-                  const match = comment.body.match(IGNORE_REGEX);
-                  if (match) {
-                    const numbers = match[1]
-                      .split(/[,\s]+/)
-                      .map(n => parseInt(n.trim()))
-                      .filter(n => !isNaN(n));
-
-                    if (numbers.length > 0) {
-                      console.log(`Found ignore command in thread comment: ${numbers.join(', ')}`);
-                      numbers.forEach(num => ignoredIssueNumbers.add(num));
-                    }
-                  }
-                }
-              }
-            } catch (error) {
-              console.error(`Failed to scan review threads: ${error.message}`);
-            }
-
-            // Apply ignore status
-            if (!state.issues) state.issues = [];
-            const validIssueNumbers = state.issues.map(i => i.issue_number).filter(n => n);
-            const validIgnored = Array.from(ignoredIssueNumbers).filter(n => validIssueNumbers.includes(n));
-
-            if (validIgnored.length > 0) {
-              console.log(`Marking issues as ignored: ${validIgnored.sort((a,b) => a-b).join(', ')}`);
-
-              for (const issue of state.issues) {
-                if (validIgnored.includes(issue.issue_number)) {
-                  issue.status = 'ignored';
-                }
-              }
-
-              fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-              console.log('Updated state with ignored issues');
-            } else {
-              console.log('No new ignored issues found');
-            }
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/detect-ignore-commands.ts');
+            await main(github, context);
 
       - name: Prepare Review Context
         id: prepare-context
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const fs = require('fs');
-
-            if (!fs.existsSync('state.json')) {
-              core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous review found.');
-              return;
-            }
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-
-            if (!state.issues || state.issues.length === 0) {
-              core.exportVariable('PREVIOUS_REVIEW_CONTEXT', 'No previous issues found.');
-              return;
-            }
-
-            // Group issues by status
-            const activeIssues = state.issues.filter(i =>
-              i.status !== 'resolved' && i.status !== 'ignored'
-            );
-            const ignoredIssues = state.issues.filter(i => i.status === 'ignored');
-
-            let reviewContext = '';
-
-            if (activeIssues.length > 0) {
-              reviewContext += '### Active Issues to Re-evaluate\n\n';
-              for (const issue of activeIssues) {
-                reviewContext += `**Issue #${issue.issue_number}** (${issue.status ?? 'unknown'})\n`;
-                reviewContext += `- **Category**: ${issue.category}\n`;
-                reviewContext += `- **Severity**: ${issue.severity ?? 'not specified'}\n`;
-                reviewContext += `- **Description**: ${issue.description}\n`;
-                if (issue.file) {
-                  reviewContext += `- **Location**: ${issue.file}`;
-                  if (issue.line) reviewContext += `:${issue.line}`;
-                  reviewContext += '\n';
-                }
-                reviewContext += '\n';
-              }
-            }
-
-            if (ignoredIssues.length > 0) {
-              reviewContext += '### Ignored Issues (for context only)\n\n';
-              for (const issue of ignoredIssues) {
-                reviewContext += `**Issue #${issue.issue_number}** (status: "ignored")\n`;
-                reviewContext += `- **Category**: ${issue.category}\n`;
-                reviewContext += `- **Description**: ${issue.description}\n`;
-                if (issue.file) {
-                  reviewContext += `- **Location**: ${issue.file}`;
-                  if (issue.line) reviewContext += `:${issue.line}`;
-                  reviewContext += '\n';
-                }
-                reviewContext += '\n';
-              }
-            }
-
-            if (reviewContext === '') {
-              reviewContext = 'No previous issues found.';
-            }
-
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/prepare-review-context.ts');
+            const reviewContext = await main();
             core.exportVariable('PREVIOUS_REVIEW_CONTEXT', reviewContext);
-            console.log('Prepared review context with ' + activeIssues.length + ' active and ' + ignoredIssues.length + ' ignored issues');
 
       - name: Determine Review Mode & Diff Base
         id: determine-mode
@@ -395,7 +196,7 @@ jobs:
 
       - name: Process Review
         if: ${{ steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/process-review.ts
+        run: npx tsx .github/scripts/claude-review/process-review.ts
         env:
           HEAD_SHA: ${{ steps.get-pr-details.outputs.head_sha }}
           REVIEW_MODE: ${{ env.REVIEW_MODE }}
@@ -403,172 +204,37 @@ jobs:
       - name: Create Inline Comments
         if: ${{ steps.review.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const fs = require('fs');
-
-            if (!fs.existsSync('state.json')) {
-              console.log('No state.json found, skipping inline comments');
-              return;
-            }
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-
-            const newLineIssues = state.issues.filter(i => {
-              if (i.status !== 'new' || !i.line || !i.file) return false;
-              return fs.existsSync(i.file);
-            });
-
-            if (newLineIssues.length === 0) {
-              console.log('No new line-specific issues to comment on');
-              return;
-            }
-
-            console.log(`Found ${newLineIssues.length} new line-specific issues`);
-
-            const filesResponse = await github.rest.pulls.listFiles({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
-            const changedFiles = new Set(filesResponse.data.map(f => f.filename));
-
-            const validatedIssues = newLineIssues.filter(i => changedFiles.has(i.file));
-
-            if (validatedIssues.length === 0) {
-              console.log('No valid issues to comment on after validation');
-              return;
-            }
-
-            console.log(`Posting ${validatedIssues.length} inline comments`);
-
-            let successCount = 0;
-
-            for (const issue of validatedIssues) {
-              const body = `**Issue ${issue.issue_number}: ${issue.category}**\n\n${issue.description}\n\n**Suggested Fix:**\n${issue.suggested_fix}\n\n<!-- issue_number:${issue.issue_number} -->`;
-
-              try {
-                const response = await github.rest.pulls.createReviewComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: context.issue.number,
-                  commit_id: '${{ steps.get-pr-details.outputs.head_sha }}',
-                  path: issue.file,
-                  line: issue.line,
-                  side: 'RIGHT',
-                  body: body
-                });
-
-                issue.comment_id = response.data.id;
-                successCount++;
-              } catch (error) {
-                console.error(`Failed to comment on ${issue.file}:${issue.line} - ${error.message}`);
-              }
-            }
-
-            fs.writeFileSync('state.json', JSON.stringify(state, null, 2));
-            console.log(`Successfully posted ${successCount}/${validatedIssues.length} comments`)
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/create-inline-comments.ts');
+            await main(github, context, '${{ steps.get-pr-details.outputs.head_sha }}');
 
       - name: Encode State
         if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const zlib = require('zlib');
-
-            const state = JSON.parse(fs.readFileSync('state.json', 'utf-8'));
-            const compressed = zlib.gzipSync(JSON.stringify(state));
-            const encoded = compressed.toString('base64');
-            fs.writeFileSync('state_encoded.txt', encoded);
-
-            console.log('Encoded state for summary');
+        run: npx tsx .github/scripts/claude-review/encode-state.ts
 
       - name: Generate Summary
         if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/generate-summary.ts
+        run: npx tsx .github/scripts/claude-review/generate-summary.ts
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_PR_NUMBER: ${{ env.GITHUB_PR_NUMBER }}
 
-      - name: Find Results Comment
-        if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        id: find-results-comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const marker = '<!-- claude-review-results -->';
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const resultsComment = comments.data.find(c =>
-              c.user.type === 'Bot' && c.body.includes(marker)
-            );
-
-            if (resultsComment) {
-              console.log(`Found existing results comment: ${resultsComment.id}`);
-              core.setOutput('exists', 'true');
-              core.setOutput('comment_id', resultsComment.id);
-            } else {
-              console.log('No results comment found');
-              core.setOutput('exists', 'false');
-              core.setOutput('comment_id', '');
-            }
-
       - name: Update Comments
         if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const fs = require('fs');
-            const summaryMd = fs.readFileSync('summary.md', 'utf-8');
-
-            const resultsExists = '${{ steps.find-results-comment.outputs.exists }}' === 'true';
-            const resultsCommentId = '${{ steps.find-results-comment.outputs.comment_id }}';
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/update-comments.ts');
             const runningCommentId = '${{ steps.running-comment.outputs.comment-id }}';
+            const runId = '${{ github.run_id }}';
             const hasChanges = '${{ steps.validate.outputs.has_changes }}' === 'true';
-
-            if (!resultsExists) {
-              // First run: Convert running comment to results comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: runningCommentId,
-                body: summaryMd
-              });
-              console.log('Updated running comment with results (first run)');
-            } else {
-              // Subsequent: Update results comment
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: resultsCommentId,
-                body: summaryMd
-              });
-              console.log('Updated results comment');
-
-              // Update running comment with link
-              const linkBody = hasChanges
-                ? `## ✅ Claude Review Complete\n\nReview finished successfully! See the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).\n\n[View workflow run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${{ github.run_id }})`
-                : `## ✅ Claude Review Complete\n\nNo changes detected since the last review.\n\nSee the [results comment](https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${context.issue.number}#issuecomment-${resultsCommentId}).`;
-
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: runningCommentId,
-                body: linkBody
-              });
-              console.log('Updated running comment with link');
-            }
+            await main(github, context, runningCommentId, runId, hasChanges);
 
       - name: Update Running Comment - Failure
         if: ${{ failure() && steps.running-comment.outputs.comment-id }}
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           comment-id: ${{ steps.running-comment.outputs.comment-id }}
           issue-number: ${{ env.GITHUB_PR_NUMBER }}
