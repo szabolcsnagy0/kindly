@@ -86,3 +86,8 @@ class RequestCannotBeUpdatedError(ServiceException):
 class QuestNotFoundError(ServiceException):
     def __init__(self, message: str = "Quest not found"):
         super().__init__(message, status_code=status.HTTP_404_NOT_FOUND)
+
+
+class BadgeNotFoundError(ServiceException):
+    def __init__(self, message: str = "Badge not found"):
+        super().__init__(message, status_code=status.HTTP_404_NOT_FOUND)
