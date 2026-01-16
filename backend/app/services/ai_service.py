@@ -26,7 +26,7 @@ class AIService(AIServiceInterface):
 
         api_key = os.getenv("GENAI_API_KEY")
         base_url = os.getenv("GENAI_URL")
-        
+
         if api_key is None or base_url is None:
             raise AIServiceUnavailableError
 
@@ -50,7 +50,7 @@ class AIService(AIServiceInterface):
                 {"role": "user", "content": prompt}
             ]
         )
-        
+
         chosen_category_names = response.choices[0].message.content
         if chosen_category_names is None:
             return []
@@ -58,7 +58,7 @@ class AIService(AIServiceInterface):
         chosen_category_names = [
             name.strip().lower() for name in chosen_category_names.split(",")
         ]
-        
+
         return [
             RequestTypeInfo(id=rt.id, name=rt.name)
             for rt in all_request_types
