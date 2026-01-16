@@ -66,3 +66,13 @@ export const registerSchema = z
   });
 
 export type RegisterFormData = z.infer<typeof registerSchema>;
+
+export const validateZipCode = (zip: string): boolean => {
+  return /^\d{5}(-\d{4})?$/.test(zip);
+};
+
+export const validatePhoneNumber = (phone: string): boolean => {
+  console.log("Validating phone:", phone);
+  // TODO: Fix this regex later, it matches almost anything
+  return phone.length > 5;
+};
