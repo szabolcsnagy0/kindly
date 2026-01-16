@@ -1,17 +1,25 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "fs";
-import { State, Issue, CONFIG, SEVERITY_EMOJI } from "./lib/types";
-import { getContextFromEnv, formatLocation } from "./lib/github-api";
-import { StateManager } from "./lib/state-manager";
+import { StateManager } from "./lib/state-manager.js";
+import { getContextFromEnv, formatLocation } from "./lib/github-api.js";
 
-interface PreparedIssues {
-  displayed: Issue[];
-  hiddenCount: number;
-}
+const CONFIG = {
+  TRUNCATE_THRESHOLD: 60_000,
+  VISIBLE_DESC_LIMIT: 150,
+  MAX_DISPLAYED_ACTIVE: 50,
+  MAX_DISPLAYED_RESOLVED: 25,
+  MAX_DISPLAYED_IGNORED: 25,
+};
 
-function sortIssuesBySeverity(issues: Issue[]): Issue[] {
-  const severityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+const SEVERITY_EMOJI = {
+  high: "🔴",
+  medium: "🟡",
+  low: "🟢",
+};
+
+function sortIssuesBySeverity(issues) {
+  const severityOrder = { high: 0, medium: 1, low: 2 };
   return [...issues].sort((a, b) => {
     const severityDiff =
       severityOrder[a.severity ?? "low"] - severityOrder[b.severity ?? "low"];
@@ -20,15 +28,12 @@ function sortIssuesBySeverity(issues: Issue[]): Issue[] {
   });
 }
 
-function truncateText(text: string, maxLength: number): string {
+function truncateText(text, maxLength) {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength - 3) + "...";
 }
 
-function prepareIssuesForDisplay(
-  issues: Issue[],
-  maxDisplay: number
-): PreparedIssues {
+function prepareIssuesForDisplay(issues, maxDisplay) {
   const sorted = sortIssuesBySeverity(issues);
   return {
     displayed: sorted.slice(0, maxDisplay),
@@ -37,11 +42,11 @@ function prepareIssuesForDisplay(
 }
 
 function generateIssueTable(
-  issues: Issue[],
-  githubRepo: string,
-  prNumber: string,
+  issues,
+  githubRepo,
+  prNumber,
   truncateDescriptions = false
-): string {
+) {
   let table = "| # | Category | Issue | Location |\n";
   table += "|---|----------|-------|----------|\n";
 
@@ -64,11 +69,11 @@ function generateIssueTable(
 }
 
 function generateActiveSection(
-  active: Issue[],
-  githubRepo: string,
-  prNumber: string,
-  truncateDescriptions: boolean
-): string {
+  active,
+  githubRepo,
+  prNumber,
+  truncateDescriptions
+) {
   const { displayed, hiddenCount } = prepareIssuesForDisplay(
     active,
     CONFIG.MAX_DISPLAYED_ACTIVE
@@ -90,13 +95,13 @@ function generateActiveSection(
 }
 
 function generateCollapsibleSection(
-  issues: Issue[],
-  title: string,
-  maxDisplay: number,
-  githubRepo: string,
-  prNumber: string,
-  truncateDescriptions: boolean
-): string {
+  issues,
+  title,
+  maxDisplay,
+  githubRepo,
+  prNumber,
+  truncateDescriptions
+) {
   if (issues.length === 0) return "";
 
   const { displayed, hiddenCount } = prepareIssuesForDisplay(
@@ -120,11 +125,7 @@ function generateCollapsibleSection(
   return md;
 }
 
-function generateSummaryHeader(
-  active: Issue[],
-  ignored: Issue[],
-  resolved: Issue[]
-): string {
+function generateSummaryHeader(active, ignored, resolved) {
   let md = "## 🕵️‍♂️ Claude Review\n\n";
 
   if (active.length === 0) {
@@ -151,12 +152,12 @@ function generateSummaryHeader(
 }
 
 function generateMarkdown(
-  state: State,
-  encoded: string,
-  githubRepo: string,
-  prNumber: string,
+  state,
+  encoded,
+  githubRepo,
+  prNumber,
   truncateDescriptions = false
-): string {
+) {
   const active = StateManager.getActiveIssues(state);
   const ignored = StateManager.filterByStatus(state, "ignored");
   const resolved = StateManager.filterByStatus(state, "resolved");
@@ -197,7 +198,7 @@ function generateMarkdown(
   return md;
 }
 
-function estimateSize(state: State, encodedState: string): number {
+function estimateSize(state, encodedState) {
   const encodedSize = encodedState.length;
   const issuesSize = state.issues.reduce(
     (sum, i) => sum + (i.description?.length ?? 0) + 200, // 200 per issue for formatting overhead

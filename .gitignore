@@ -18,6 +18,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!.github/scripts/claude-review/lib/
 lib64/
 parts/
 sdist/

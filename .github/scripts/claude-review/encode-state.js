@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { writeFileSync } from "fs";
-import { StateManager } from "./lib/state-manager";
+import { StateManager } from "./lib/state-manager.js";
 
 async function main() {
   try {

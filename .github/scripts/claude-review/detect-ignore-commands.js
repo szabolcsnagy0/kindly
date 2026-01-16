@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 
-import { StateManager } from "./lib/state-manager";
-import { GitHubAPI, GitHubScriptContext } from "./lib/github-api";
+import { StateManager } from "./lib/state-manager.js";
 
 // Matches 'claude-ignore' at start of string or start of line
 const IGNORE_REGEX = /(?:^|\n)\s*claude-ignore\s+([\d,\s]+)/i;
 
-function parseIgnoreCommand(text: string): number[] {
+function parseIgnoreCommand(text) {
   const match = text.match(IGNORE_REGEX);
   if (!match) return [];
 
@@ -16,12 +15,8 @@ function parseIgnoreCommand(text: string): number[] {
     .filter((n) => !isNaN(n));
 }
 
-async function scanPRComments(
-  github: GitHubAPI,
-  context: GitHubScriptContext,
-  prNumber: string
-): Promise<Set<number>> {
-  const ignoredIssueNumbers = new Set<number>();
+async function scanPRComments(github, context, prNumber) {
+  const ignoredIssueNumbers = new Set();
 
   const allComments = await github.rest.issues.listComments({
     owner: context.repo.owner,
@@ -42,12 +37,8 @@ async function scanPRComments(
   return ignoredIssueNumbers;
 }
 
-async function scanReviewThreads(
-  github: GitHubAPI,
-  context: GitHubScriptContext,
-  prNumber: string
-): Promise<Set<number>> {
-  const ignoredIssueNumbers = new Set<number>();
+async function scanReviewThreads(github, context, prNumber) {
+  const ignoredIssueNumbers = new Set();
 
   try {
     const pr = await github.rest.pulls.get({
@@ -103,7 +94,7 @@ async function scanReviewThreads(
   return ignoredIssueNumbers;
 }
 
-async function main(github: GitHubAPI, context: GitHubScriptContext) {
+export async function main(github, context) {
   try {
     const prNumber = process.env.GITHUB_PR_NUMBER;
     if (!prNumber) {
@@ -125,7 +116,7 @@ async function main(github: GitHubAPI, context: GitHubScriptContext) {
     // Apply ignore status
     const validIssueNumbers = state.issues
       .map((i) => i.issue_number)
-      .filter((n): n is number => n !== undefined);
+      .filter((n) => n !== undefined);
     const validIgnored = Array.from(ignoredIssueNumbers).filter((n) =>
       validIssueNumbers.includes(n)
     );
@@ -156,5 +147,3 @@ async function main(github: GitHubAPI, context: GitHubScriptContext) {
     process.exit(1);
   }
 }
-
-export { main };

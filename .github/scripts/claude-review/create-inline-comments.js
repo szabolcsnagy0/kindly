@@ -1,18 +1,10 @@
 #!/usr/bin/env node
 
 import { existsSync } from "fs";
-import { StateManager } from "./lib/state-manager";
-import {
-  buildInlineCommentBody,
-  GitHubAPI,
-  GitHubScriptContext,
-} from "./lib/github-api";
+import { StateManager } from "./lib/state-manager.js";
+import { buildInlineCommentBody } from "./lib/github-api.js";
 
-async function main(
-  github: GitHubAPI,
-  context: GitHubScriptContext,
-  headSha: string
-) {
+export async function main(github, context, headSha) {
   try {
     const prNumber = process.env.GITHUB_PR_NUMBER;
     if (!prNumber) {
@@ -98,5 +90,3 @@ async function main(
     process.exit(1);
   }
 }
-
-export { main };

@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
-import { StateManager } from "./lib/state-manager";
-import { Issue } from "./lib/types";
+import { StateManager } from "./lib/state-manager.js";
 
-function formatIssueContext(issue: Issue): string {
+function formatIssueContext(issue) {
   let context = `**Issue #${issue.issue_number}** (${
     issue.status ?? "unknown"
   })\n`;
@@ -23,7 +22,7 @@ function formatIssueContext(issue: Issue): string {
   return context;
 }
 
-function generateActiveSection(activeIssues: Issue[]): string {
+function generateActiveSection(activeIssues) {
   if (activeIssues.length === 0) return "";
 
   let section = "### Active Issues to Re-evaluate\n\n";
@@ -33,7 +32,7 @@ function generateActiveSection(activeIssues: Issue[]): string {
   return section;
 }
 
-function generateIgnoredSection(ignoredIssues: Issue[]): string {
+function generateIgnoredSection(ignoredIssues) {
   if (ignoredIssues.length === 0) return "";
 
   let section = "### Ignored Issues (for context only)\n\n";
@@ -43,7 +42,7 @@ function generateIgnoredSection(ignoredIssues: Issue[]): string {
   return section;
 }
 
-function main() {
+export function main() {
   try {
     const state = StateManager.load("state.json");
 
@@ -77,5 +76,3 @@ function main() {
     return "No previous review found.";
   }
 }
-
-export { main };

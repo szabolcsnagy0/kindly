@@ -1,18 +1,8 @@
 #!/usr/bin/env node
 
-import { StateManager } from "./lib/state-manager";
-import { State } from "./lib/types";
-import { GitHubAPI, GitHubScriptContext } from "./lib/github-api";
+import { StateManager } from "./lib/state-manager.js";
 
-interface PreviousState {
-  state: State;
-  previous_sha: string;
-}
-
-async function main(
-  github: GitHubAPI,
-  context: GitHubScriptContext
-): Promise<PreviousState> {
+export async function main(github, context) {
   try {
     const prNumber = process.env.GITHUB_PR_NUMBER;
     if (!prNumber) {
@@ -89,5 +79,3 @@ async function main(
     };
   }
 }
-
-export { main };

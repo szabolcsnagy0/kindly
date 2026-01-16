@@ -84,7 +84,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          npm install -g tsx
           # Ensure ripgrep is installed
           command -v rg >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y ripgrep
 
@@ -93,7 +92,7 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/get-previous-state.ts');
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/get-previous-state.js');
             const { state, previous_sha } = await main(github, context);
 
             // Save state to file
@@ -109,7 +108,7 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/detect-ignore-commands.ts');
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/detect-ignore-commands.js');
             await main(github, context);
 
       - name: Prepare Review Context
@@ -117,7 +116,7 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/prepare-review-context.ts');
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/prepare-review-context.js');
             const reviewContext = await main();
             core.exportVariable('PREVIOUS_REVIEW_CONTEXT', reviewContext);
 
@@ -196,7 +195,7 @@ jobs:
 
       - name: Process Review
         if: ${{ steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/claude-review/process-review.ts
+        run: node .github/scripts/claude-review/process-review.js
         env:
           HEAD_SHA: ${{ steps.get-pr-details.outputs.head_sha }}
           REVIEW_MODE: ${{ env.REVIEW_MODE }}
@@ -207,16 +206,16 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/create-inline-comments.ts');
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/create-inline-comments.js');
             await main(github, context, '${{ steps.get-pr-details.outputs.head_sha }}');
 
       - name: Encode State
         if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/claude-review/encode-state.ts
+        run: node .github/scripts/claude-review/encode-state.js
 
       - name: Generate Summary
         if: ${{ steps.validate.outputs.has_changes == 'false' || steps.review.outcome == 'success' }}
-        run: npx tsx .github/scripts/claude-review/generate-summary.ts
+        run: node .github/scripts/claude-review/generate-summary.js
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_PR_NUMBER: ${{ env.GITHUB_PR_NUMBER }}
@@ -226,7 +225,7 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/update-comments.ts');
+            const { main } = await import('${{ github.workspace }}/.github/scripts/claude-review/update-comments.js');
             const runningCommentId = '${{ steps.running-comment.outputs.comment-id }}';
             const runId = '${{ github.run_id }}';
             const hasChanges = '${{ steps.validate.outputs.has_changes }}' === 'true';

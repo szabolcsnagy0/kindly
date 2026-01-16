@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "fs";
-import { GitHubAPI, GitHubScriptContext } from "./lib/github-api";
 
-async function findResultsComment(
-  github: GitHubAPI,
-  context: GitHubScriptContext,
-  prNumber: string
-): Promise<string | null> {
+async function findResultsComment(github, context, prNumber) {
   const marker = "<!-- claude-review-results -->";
 
   const comments = await github.rest.issues.listComments({
@@ -29,13 +24,7 @@ async function findResultsComment(
   return null;
 }
 
-async function main(
-  github: GitHubAPI,
-  context: GitHubScriptContext,
-  runningCommentId: string,
-  runId: string,
-  hasChanges: boolean
-) {
+export async function main(github, context, runningCommentId, runId, hasChanges) {
   try {
     const prNumber = process.env.GITHUB_PR_NUMBER;
     if (!prNumber) {
@@ -90,5 +79,3 @@ async function main(
     process.exit(1);
   }
 }
-
-export { main };

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "fs";
-import { State, Issue, ReviewOutput, IssueStatus } from "./lib/types";
-import { StateManager } from "./lib/state-manager";
+import { StateManager } from "./lib/state-manager.js";
 
-function extractReviewOutput(content: string): string {
+function extractReviewOutput(content) {
   // Use regex to find the last occurrence
   const regex = /<review_output>([\s\S]*?)<\/review_output>/g;
   const matches = Array.from(content.matchAll(regex));
@@ -17,7 +16,7 @@ function extractReviewOutput(content: string): string {
   return matches[matches.length - 1][1].trim();
 }
 
-function validateReviewOutput(review: any): review is ReviewOutput {
+function validateReviewOutput(review) {
   if (
     !Array.isArray(review.new_issues) ||
     !Array.isArray(review.persisted_issue_numbers) ||
@@ -61,12 +60,12 @@ function validateReviewOutput(review: any): review is ReviewOutput {
 }
 
 function processReferencedIssues(
-  issueNumbers: number[],
-  status: IssueStatus,
-  prevIssuesByNumber: Map<number, Issue>,
-  processedIssues: Issue[],
-  reviewedIssueNumbers: Set<number>
-): void {
+  issueNumbers,
+  status,
+  prevIssuesByNumber,
+  processedIssues,
+  reviewedIssueNumbers
+) {
   for (const issueNumber of issueNumbers) {
     const prevIssue = prevIssuesByNumber.get(issueNumber);
     if (!prevIssue) {
@@ -97,7 +96,7 @@ async function main() {
     // Load Claude's output
     const content = readFileSync("review_output.txt", "utf-8");
     const reviewJson = extractReviewOutput(content);
-    const review: ReviewOutput = JSON.parse(reviewJson);
+    const review = JSON.parse(reviewJson);
 
     // Validate review output
     if (!validateReviewOutput(review)) {
@@ -112,15 +111,15 @@ async function main() {
     console.log(`Loaded previous state with ${prevState.issues.length} issues`);
 
     // Build map of previous issues by number
-    const prevIssuesByNumber = new Map<number, Issue>();
+    const prevIssuesByNumber = new Map();
     for (const issue of prevState.issues) {
       if (issue.issue_number) {
         prevIssuesByNumber.set(issue.issue_number, issue);
       }
     }
 
-    const processedIssues: Issue[] = [];
-    const reviewedIssueNumbers = new Set<number>();
+    const processedIssues = [];
+    const reviewedIssueNumbers = new Set();
 
     // Process new issues
     for (const issue of review.new_issues) {
@@ -163,7 +162,7 @@ async function main() {
       }
     }
 
-    const state: State = {
+    const state = {
       review_sha: currentSha,
       max_issue_number: maxIssueNumber,
       issues: processedIssues,
