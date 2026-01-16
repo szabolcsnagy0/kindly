@@ -42,8 +42,10 @@ class User(Base):
 
     quests: Mapped[List["Quest"]] = relationship("Quest", back_populates="user")
 
+    badge_achievements: Mapped[List["BadgeAchievement"]] = relationship("BadgeAchievement", back_populates="user")
+
     def experience_to_next_level(self) -> int:
-        return 100 * self.level 
+        return 100 * self.level
 
     def add_experience(self, xp: int) -> None:
         if xp <= 0:
@@ -54,7 +56,7 @@ class User(Base):
         while self.experience >= self.experience_to_next_level():
             self.experience -= self.experience_to_next_level()
             self.level += 1
-        
+
         if self.level >= 2:
             self.add_badge(1)
 
