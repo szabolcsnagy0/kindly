@@ -156,8 +156,14 @@ async function main() {
           prevIssue.issue_number &&
           !reviewedIssueNumbers.has(prevIssue.issue_number)
         ) {
-          // Issue wasn't in review scope - carry forward unchanged
-          processedIssues.push(prevIssue);
+          // Issue wasn't in review scope - carry forward with appropriate status
+          const shouldMarkAsPersisted =
+            prevIssue.status === "new" || prevIssue.status === "persisted";
+
+          processedIssues.push({
+            ...prevIssue,
+            status: shouldMarkAsPersisted ? "persisted" : prevIssue.status,
+          });
         }
       }
     }
