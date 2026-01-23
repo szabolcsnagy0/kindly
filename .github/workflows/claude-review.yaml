@@ -103,6 +103,20 @@ jobs:
             // Set output for next steps
             core.setOutput('previous_sha', previous_sha);
 
+      - name: Extract Custom Instructions
+        id: extract-instructions
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const commentBody = context.payload?.comment?.body ?? '';
+            const match = commentBody.match(/^claude-review\s+(.+)$/s);
+            const customInstructions = match?.[1]?.trim() ?? '';
+
+            core.exportVariable('CUSTOM_INSTRUCTIONS', customInstructions);
+            console.log(customInstructions
+              ? `Custom instructions: ${customInstructions}`
+              : 'No custom instructions provided');
+
       - name: Detect Ignore Commands
         continue-on-error: true
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -188,7 +202,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CI: true
-          # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT are already in env
+          # REVIEW_MODE, DIFF_BASE, PREVIOUS_REVIEW_CONTEXT, CUSTOM_INSTRUCTIONS are already in env
         run: |
           claude --print "$(envsubst < .github/claude-review-prompt.md)" > review_output.txt
           cat review_output.txt
